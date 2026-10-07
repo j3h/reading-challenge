@@ -2,6 +2,13 @@
 """Generate reading-challenge certificates from a CSV.
 
     python make_certificates.py kids.csv --month "October 2026"
+    python make_certificates.py --roster roster.csv --entries entries.csv --prizes prizes.csv \\
+                                --month "October 2026"
+
+The second form reads CSV exports of the tracker workbook (tracker_template.xlsx) and
+makes a certificate for every child with an entry that month, listing EVERY prize level
+still owed (see tracker.py). Entries nobody has matched to a child yet are listed, not
+counted. The rest of this note describes the single-CSV form.
 
 CSV columns (header row required):
     name          Child's name
@@ -39,6 +46,8 @@ import sys
 from pathlib import Path
 
 import pymupdf
+
+import tracker
 
 HERE = Path(__file__).resolve().parent
 
@@ -248,13 +257,37 @@ def safe_filename(name, used):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("csv_file")
+    ap.add_argument("csv_file", nargs="?", help="kids CSV (or use --roster/--entries/--prizes)")
+    ap.add_argument("--roster", help="Roster tab exported as CSV")
+    ap.add_argument("--entries", help="Entries tab exported as CSV")
+    ap.add_argument("--prizes", help="Prizes tab exported as CSV")
     ap.add_argument("--month", default="", help='e.g. "October 2026" (used when a row has no month column)')
     ap.add_argument("--out", default="out", help="output folder (default: ./out)")
     args = ap.parse_args()
 
-    with open(args.csv_file, newline="", encoding="utf-8-sig") as fh:
-        rows = list(csv.DictReader(fh))
+    table = load_levels()
+    unresolved, notes = [], []
+    tracker_args = [args.roster, args.entries, args.prizes]
+    if args.csv_file and any(tracker_args):
+        sys.exit("Give either a kids CSV or --roster/--entries/--prizes, not both")
+    if any(tracker_args):
+        if not all(tracker_args):
+            sys.exit("--roster, --entries and --prizes are all needed together")
+        if not args.month:
+            sys.exit('Provide --month "October 2026"')
+        try:
+            rows, notes, unresolved = tracker.build_rows(args.roster, args.entries, args.prizes,
+                                                         args.month, table)
+        except (ValueError, KeyError, OSError) as e:
+            sys.exit(str(e))
+        args.month = tracker.month_label(tracker.month_key(args.month))
+        if not rows:
+            sys.exit(f"No counted entries for {args.month}; nothing to make.")
+    elif args.csv_file:
+        with open(args.csv_file, newline="", encoding="utf-8-sig") as fh:
+            rows = list(csv.DictReader(fh))
+    else:
+        sys.exit("Give a kids CSV, or --roster/--entries/--prizes")
     required = {"name", "pages", "total_pages"}
     missing = required - set(rows[0].keys() if rows else required)
     if missing:
@@ -267,13 +300,12 @@ def main():
     warnings = []
     warn = warnings.append
     used, combined = set(), pymupdf.open()
-    table = load_levels()
     report = []
 
     for i, row in enumerate(rows, start=2):  # line numbers as in the CSV file
         row["_default_month"] = args.month
         try:
-            levels, prizes = resolve_levels(row, table)
+            levels, prizes = row.pop("_resolved") if "_resolved" in row else resolve_levels(row, table)
             single = pymupdf.open()
             draw_certificate(single, row, levels, warn)
             draw_certificate(combined, row, levels, lambda m: None)  # warnings already recorded
@@ -287,6 +319,8 @@ def main():
         report.append({"name": row["name"].strip(), "pages_this_month": to_int(row["pages"]),
                        "total_pages": to_int(row["total_pages"]),
                        "levels": "; ".join(levels), "prizes": "; ".join(prizes)})
+        if "teacher" in row:
+            report[-1]["teacher"] = row["teacher"]
 
     combined.subset_fonts()
     combined.save(out / "all_certificates.pdf", garbage=4, deflate=True)
@@ -295,8 +329,20 @@ def main():
         w.writeheader()
         w.writerows(report)
     print(f"Wrote {len(rows)} certificates, all_certificates.pdf and prizes.csv to {out}/")
-    for w in warnings:
+    for w in warnings + notes:
         print("  note:", w)
+    (out / "unresolved.csv").unlink(missing_ok=True)
+    if unresolved:
+        with open(out / "unresolved.csv", "w", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(unresolved[0].keys()))
+            w.writeheader()
+            w.writerows(unresolved)
+        print(f"\n!! {len(unresolved)} entr{'y is' if len(unresolved) == 1 else 'ies are'} NOT counted "
+              f"(listed in {out}/unresolved.csv). Totals and prizes may be too low until they are fixed:")
+        for u in unresolved:
+            print(f"   Entries line {u['line']}: {u['name_on_form'] or '(no name)'}"
+                  f" / {u['teacher_on_form'] or '(no teacher)'}, {u['month'] or '?'}, "
+                  f"{u['pages'] or '?'} pages - {u['problem']}")
 
 
 if __name__ == "__main__":

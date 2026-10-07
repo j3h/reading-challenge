@@ -21,3 +21,15 @@ Output goes to `out/`: one PDF per child, `all_certificates.pdf` for printing, a
 listing the prizes each child has earned this month.
 
 See `CLAUDE.md` for how the layout and level logic work, and for changing the design.
+
+## Tracking forms in a spreadsheet
+
+`tracker_template.xlsx` is a Google Sheets template for entering forms, prizes handed out, and the
+roster. Export the Roster, Entries and Prizes tabs as CSV, then:
+
+```
+python make_certificates.py --roster roster.csv --entries entries.csv --prizes prizes.csv --month "October 2026"
+```
+
+Each certificate lists every prize level the child is still owed. Forms not yet matched to a child
+are listed at the end of the run (and in `out/unresolved.csv`) instead of being counted.
