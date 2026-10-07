@@ -110,3 +110,10 @@ def test_command_line_end_to_end(make, tmp_path):
     assert (out / "Ada_Example.pdf").exists() and (out / "unresolved.csv").exists()
     prizes = list(csv.DictReader(open(out / "prizes.csv")))
     assert prizes[0]["levels"].endswith("2,500 Pages") and prizes[0]["teacher"] == "Lopez"
+
+
+def test_child_with_entry_gets_certificate_even_with_nothing_owed(make):
+    rows, _, _ = build(make, [entry("2026-10", 20, "C0002"), entry("2026-09", 20, "C0003")],
+                       [["", "Sam", "First Pages", "1", "C0002", ""]])
+    assert [r["name"] for r in rows] == ["Sam Sample"]  # Io Li has no October entry: no certificate
+    assert rows[0]["_resolved"] == ([], [])
