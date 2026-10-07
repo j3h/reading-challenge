@@ -1,0 +1,14 @@
+# Generated output
+out/
+*.pdf
+!background_blank.pdf
+
+# Real data about children stays out of git. Only the two tracked CSVs below are committed.
+*.csv
+!sample.csv
+!levels.csv
+
+__pycache__/
+.venv/
+.pytest_cache/
+.DS_Store
