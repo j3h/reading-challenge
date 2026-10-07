@@ -17,6 +17,9 @@ from a CSV of children's page counts. Replaces a Canva "bulk create" workflow; w
 - `levels.csv`            prize chart: threshold, label, prize (edit this, not the code)
 - `background_blank.pdf`  Canva export with all text removed (stripes, books, borders only)
 - `fonts/`                Lexend Deca Regular (static instance) and Leckerli One, both OFL
+- `tracker_template.xlsx`  blank data-entry workbook (upload to Google Sheets); rebuilt by
+                          `python tools/make_tracker_template.py`. Entries/Prizes/Roster/Find/Levels tabs;
+                          unresolved forms stay in Entries with a blank Child until Jamie identifies them
 - `tests/`                level logic + alignment checks; `sample.csv` demo input
 
 ## How it works (read before changing layout code)

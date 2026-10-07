@@ -8,6 +8,10 @@ out/
 !sample.csv
 !levels.csv
 
+# Filled-in trackers hold children's names; only the blank template is committed.
+*.xlsx
+!tracker_template.xlsx
+
 __pycache__/
 .venv/
 .pytest_cache/
