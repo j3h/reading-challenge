@@ -77,6 +77,9 @@ INTRO_Y, INTRO_SIZE = 340.1, 21.0
 PAGES_Y, PAGES_SIZE, PAGES_MIN = 390.3, 41.0, 24.0
 PRIZE_Y, PRIZE_SIZE, PRIZE_MIN, PRIZE_LEADING = 443.3, 21.6, 14.0, 30.0
 # The grand-total line always follows the prize block at the same leading.
+# Certificates with no prize this month show "You've read N pages..." + a nudge to the next level
+# instead; their first line sits lower than the prize block's (measured from the Canva mock-up).
+PROGRESS_Y = 456.2
 
 
 LEVELS_FILE = HERE / "levels.csv"
@@ -180,7 +183,24 @@ class Typesetter:
         return self._greedy(key, tokens, size, hi)
 
 
-def draw_certificate(doc, row, levels, warn):
+def progress_lines(total, month, table):
+    """Text for a certificate with no new prize level: where the child is, and the next level."""
+    lines = [f"You\u2019ve read {total:,} {'page' if total == 1 else 'pages'} as of {month}."]
+    upcoming = [label for threshold, label, _ in table if threshold > total]
+    if upcoming:
+        level = upcoming[0].removesuffix(" Pages") if upcoming[0].endswith(" Pages") and upcoming[0][0].isdigit() \
+            else upcoming[0]
+        lines.append(f"Keep Reading to get to the {level} level!")
+    return lines
+
+
+def draw_progress(t, total, month, table):
+    for i, line in enumerate(progress_lines(total, month, table)):
+        size, _ = t.fit_size("body", line, PRIZE_SIZE, PRIZE_MIN)
+        t.centered("body", line, PROGRESS_Y + PRIZE_LEADING * i, size)
+
+
+def draw_certificate(doc, row, levels, warn, table=None):
     page = doc.new_page(width=792, height=612)
     page.show_pdf_page(page.rect, pymupdf.open(BACKGROUND), 0)
     t = Typesetter(page, doc)
@@ -218,9 +238,13 @@ def draw_certificate(doc, row, levels, warn):
 
     t.centered("body", INTRO, INTRO_Y, INTRO_SIZE)
 
-    pages_text = f"{pages:,} {'Page' if pages == 1 else 'Pages'}"
+    pages_text = f"{pages:,} {'Page' if pages == 1 else 'Pages'}" + ("" if levels else "!")
     size, _ = t.fit_size("body", pages_text, PAGES_SIZE, PAGES_MIN)
     t.centered("body", pages_text, PAGES_Y, size)
+
+    if not levels:
+        draw_progress(t, total, month, table or load_levels())
+        return page
 
     total_text = f"Grand Total: {total:,} {'page' if total == 1 else 'pages'} read as of {month}"
     tokens = prize_tokens(levels) if levels else []
@@ -307,12 +331,12 @@ def main():
         try:
             levels, prizes = row.pop("_resolved") if "_resolved" in row else resolve_levels(row, table)
             single = pymupdf.open()
-            draw_certificate(single, row, levels, warn)
-            draw_certificate(combined, row, levels, lambda m: None)  # warnings already recorded
+            draw_certificate(single, row, levels, warn, table)
+            draw_certificate(combined, row, levels, lambda m: None, table)  # warnings already recorded
         except (ValueError, KeyError) as e:
             sys.exit(f"CSV line {i}: could not read row ({e!r}): {row}")
         if not levels:
-            warn(f"{row['name'].strip()!r}: no new prize level this month (certificate has no prize line)")
+            warn(f"{row['name'].strip()!r}: no new prize level this month (certificate shows progress to the next level)")
         single.subset_fonts()
         single.save(out / safe_filename(row["name"], used), garbage=4, deflate=True)
         single.close()

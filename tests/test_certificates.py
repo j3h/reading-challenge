@@ -94,3 +94,23 @@ def test_prize_names_are_never_split_across_lines():
 def test_singular_page_wording():
     text = " ".join(l["text"] for l in render("Io Li", 1, 1, ["First Pages"]))
     assert "1 Page" in text and "1 page read" in text
+
+
+# ---- certificates with no new prize level ------------------------------------
+def test_progress_lines_point_to_next_level():
+    assert mc.progress_lines(1436, "October 2026", TABLE) == [
+        "You’ve read 1,436 pages as of October 2026.", "Keep Reading to get to the 2,500 level!"]
+    assert mc.progress_lines(1, "October 2026", TABLE)[0] == "You’ve read 1 page as of October 2026."
+
+
+def test_progress_lines_without_a_next_level():
+    assert len(mc.progress_lines(250000, "October 2026", TABLE)) == 1
+
+
+def test_no_prize_certificate_text(tmp_path):
+    doc = pymupdf.open()
+    mc.draw_certificate(doc, {"name": "Idella Fritsch", "pages": "403", "total_pages": "1436",
+                              "_default_month": "October 2026"}, [], lambda m: None, TABLE)
+    text = doc[0].get_text()
+    assert "403 Pages!" in text and "Keep Reading to get to the 2,500 level!" in text
+    assert "Grand Total" not in text and "prize level" not in text
