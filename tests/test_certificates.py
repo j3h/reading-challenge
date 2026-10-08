@@ -112,5 +112,5 @@ def test_no_prize_certificate_text(tmp_path):
     mc.draw_certificate(doc, {"name": "Idella Fritsch", "pages": "403", "total_pages": "1436",
                               "_default_month": "October 2026"}, [], lambda m: None, TABLE)
     text = doc[0].get_text()
-    assert "403 Pages!" in text and "Keep Reading to get to the 2,500 level!" in text
+    assert "403 Pages" in text and "403 Pages!" not in text and "Keep Reading to get to the 2,500 level!" in text
     assert "Grand Total" not in text and "prize level" not in text

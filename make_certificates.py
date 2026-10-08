@@ -238,7 +238,7 @@ def draw_certificate(doc, row, levels, warn, table=None):
 
     t.centered("body", INTRO, INTRO_Y, INTRO_SIZE)
 
-    pages_text = f"{pages:,} {'Page' if pages == 1 else 'Pages'}" + ("" if levels else "!")
+    pages_text = f"{pages:,} {'Page' if pages == 1 else 'Pages'}"
     size, _ = t.fit_size("body", pages_text, PAGES_SIZE, PAGES_MIN)
     t.centered("body", pages_text, PAGES_Y, size)
 
