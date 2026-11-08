@@ -79,7 +79,7 @@ except extraction (OCR), the review UI and the one-command runner.
 - `rc/extract.py`     reads scans with Claude vision (`claude-opus-5-5`) into `work/records.json`; every raw answer is
   cached in `work/raw/` so re-runs are free. Run as `op run --env-file=.env -- python -m rc --data D extract --month M`
   (`.env` holds only a 1Password reference). First measured cost: about $0.28 per 10 pages.
-- `rc/review_web.py` + `rc/review.html`  `python -m rc --data D review --month M`: local page (127.0.0.1, token-guarded) with the scan
+- `rc/review_web.py` + `rc/review_table.html` (default; `rc/review.html` is the older card view at `/?view=cards`)  `python -m rc --data D review --month M`: local page (127.0.0.1, token-guarded) with the scan
   beside each question; saves to `work/decisions.json` as you go. One sheet at a time; every open sheet has a pre-filled
   suggestion (`review.suggest`) so the operator mostly presses Enter, or "Accept all suggestions". The month written
   on a sheet never blocks: the batch month is used and a mismatch is only shown (early next-month dates count). Nicknames: built-in groups (Rozzie/Rosalind) plus

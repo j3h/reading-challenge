@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Reading Challenge review (table)</title>
 <style>
-  /* Experimental table view. To roll back: delete this file (the card view at / is unchanged). */
   :root {
     --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #e4e3dc; --row: #fbfaf7;
     --accent: #3b2fc9; --accent-ink: #ffffff; --open: #c2570c; --auto: #19794a; --decided: #2f6fd6; --skip: #8a8a90;
@@ -47,12 +46,15 @@
   .muted { color: var(--muted); }
   .unsure { color: var(--open); font-weight: 600; }
   .why { font-size: 12px; color: var(--open); }
-  tr.edit td { background: var(--sel); padding: 0 10px 14px; }
-  .editor { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.1fr); gap: 16px; padding-top: 4px; }
-  @media (max-width: 900px) { .editor { grid-template-columns: 1fr; } }
-  .snips { display: grid; grid-template-columns: 64px 1fr; gap: 6px 8px; align-items: center; }
-  .snips img { max-width: 100%; max-height: 70px; border: 1px solid var(--line); border-radius: 6px; background: #fff; cursor: zoom-in; }
-  .snips img.big { max-height: 220px; cursor: zoom-out; }
+  table { table-layout: fixed; }
+  col.c-st { width: 118px; } col.c-pg { width: 46px; } col.c-name { width: 17%; } col.c-stu { width: 25%; }
+  col.c-tea { width: 17%; } col.c-pp { width: 13%; }
+  tr.row.sel td { vertical-align: top; padding-bottom: 12px; }
+  td .stack { display: flex; flex-direction: column; gap: 6px; }
+  td .stack > select, td .stack > input { width: 100%; }
+  img.snip { display: block; max-width: 100%; max-height: 64px; border: 1px solid var(--line); border-radius: 6px; background: #fff; cursor: zoom-in; }
+  img.snip.big { max-height: 220px; cursor: zoom-out; }
+  td.num input { text-align: right; }
   .grid { display: grid; grid-template-columns: 70px 1fr; gap: 7px 10px; align-items: center; }
   .grid label { color: var(--muted); font-size: 13px; }
   .grid .full { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -76,7 +78,7 @@
 <header>
   <h1 id="title">Reading Challenge review</h1>
   <div class="counts" id="counts"></div>
-  <a href="/" class="hint">Card view</a>
+  <a href="/?view=cards" class="hint">Card view</a>
   <button id="acceptAll"></button>
   <button id="finish" class="primary" disabled>Finish month</button>
 </header>
@@ -153,21 +155,106 @@ function render() {
   $("acceptAll").textContent = `Accept all suggestions (${state.acceptable})`; $("acceptAll").disabled = !state.acceptable;
   $("finish").disabled = !state.ready;
   const body = el("tbody");
-  for (const s of visible()) {
-    const r = s.read, sel = s.key === selected;
-    body.append(el("tr", { class: "row" + (sel ? " sel" : ""), onclick: () => open(s.key) },
-      el("td", {}, el("span", { class: "st " + s.status }, label[s.status])),
-      el("td", { class: "muted" }, s.page),
-      el("td", {}, r.name || "(no name)", r.confidence !== "high" ? el("span", { class: "unsure" }, " ?") : ""),
-      el("td", {}, studentCell(s)),
-      el("td", {}, s.status === "skipped" ? "" : (s.form.teacher || el("span", { class: "why" }, "choose"))),
-      el("td", { class: "num" }, s.status === "skipped" ? "" : fmt(s.form.pages), r.pages_confidence !== "high" && s.status !== "skipped" ? el("span", { class: "unsure" }, " ?") : ""),
-      el("td", {}, s.status === "open" ? el("span", { class: "why" }, s.reasons.join(" · ")) : el("span", { class: "muted" }, s.warnings[0] || ""))));
-    if (sel) body.append(el("tr", { class: "edit" }, el("td", { colspan: 7 }, editor(s))));
-  }
+  for (const s of visible()) body.append(s.key === selected ? openRow(s) : closedRow(s));
   $("app").replaceChildren(el("table", {},
+    el("colgroup", {}, ["c-st", "c-pg", "c-name", "c-stu", "c-tea", "c-pp", "c-chk"].map((c) => el("col", { class: c }))),
     el("thead", {}, el("tr", {}, ["Status", "Page", "Name on sheet", "Student", "Teacher", "Pages", "Check"].map((h) => el("th", {}, h)))), body));
   renderSheet();
+}
+
+function closedRow(s) {
+  const r = s.read;
+  return el("tr", { class: "row", onclick: () => open(s.key) },
+    el("td", {}, el("span", { class: "st " + s.status }, label[s.status])),
+    el("td", { class: "muted" }, s.page),
+    el("td", {}, r.name || "(no name)", r.confidence !== "high" ? el("span", { class: "unsure" }, " ?") : ""),
+    el("td", {}, studentCell(s)),
+    el("td", {}, s.status === "skipped" ? "" : (s.form.teacher || el("span", { class: "why" }, "choose"))),
+    el("td", { class: "num" }, s.status === "skipped" ? "" : fmt(s.form.pages), r.pages_confidence !== "high" && s.status !== "skipped" ? el("span", { class: "unsure" }, " ?") : ""),
+    el("td", {}, s.status === "open" ? el("span", { class: "why" }, s.reasons.join(" · ")) : el("span", { class: "muted" }, s.warnings[0] || "")));
+}
+
+function snip(s, field) {     // the handwriting a value was read from, right under the value
+  if (!s.read.boxes.includes(field)) return null;
+  const img = el("img", { class: "snip", alt: "", title: "What the sheet says (click to enlarge)",
+    src: `/crop?key=${encodeURIComponent(s.key)}&field=${field}&t=${TOKEN}`, onclick: (e) => { e.stopPropagation(); e.target.classList.toggle("big"); } });
+  img.addEventListener("error", () => img.remove());
+  return img;
+}
+
+// ---------------------------------------------------------------- the open row: every value edited in its own column
+function openRow(s) {
+  const r = s.read, stop = (e) => e.stopPropagation();
+  if (!form) form = JSON.parse(JSON.stringify(s.form));
+  const f = form;
+  const statusCell = el("td", {}, el("div", { class: "stack" }, el("span", { class: "st " + s.status }, label[s.status]),
+    el("button", { onclick: (e) => { stop(e); showSheet = !showSheet; renderSheet(); }, title: s.label }, showSheet ? "Hide sheet" : "Whole sheet")));
+  const nameCell = el("td", {}, el("div", { class: "stack" },
+    el("span", {}, r.name || "(no name)", r.confidence !== "high" ? el("span", { class: "unsure" }, " ?") : ""), snip(s, "name"),
+    r.note ? el("span", { class: "hint" }, r.note) : null));
+  const checkCell = el("td", {}, el("div", { class: "stack" },
+    s.status === "open" && s.reasons.length ? el("div", { class: "box why" }, el("ul", {}, s.reasons.map((x) => el("li", {}, x)))) : null,
+    ...s.warnings.map((w) => el("div", { class: "box info" }, w)), snip(s, "month")));
+  if (s.status === "skipped") {
+    checkCell.firstChild.append(el("div", { class: "box info" }, s.outcome),
+      el("div", { class: "actions" }, el("button", { class: "primary", onclick: (e) => { stop(e); save({}, false); } }, "Un-skip")));
+    return el("tr", { class: "row sel", onclick: () => open(s.key) }, statusCell, el("td", { class: "muted" }, s.page), nameCell,
+      el("td"), el("td"), el("td"), checkCell);
+  }
+  // student
+  const cands = s.candidates.filter((c) => !c.from_hints);
+  const who = el("select", { onchange: (e) => {
+    const v = e.target.value;
+    if (v === "__new") f.mode = "new";
+    else { f.mode = "student"; f.student = v; const p = state.roster.find((x) => x.id === v); f.teacher = p ? p.teacher : ""; }
+    render();
+  } });
+  const options = [...cands];
+  if (f.mode === "student" && f.student && !options.some((c) => c.id === f.student)) {
+    const p = state.roster.find((x) => x.id === f.student); if (p) options.unshift({ ...p });
+  }
+  for (const c of options) who.append(el("option", { value: c.id, selected: f.mode === "student" && f.student === c.id },
+    `${c.name} · ${c.teacher || "no teacher"}${c.grade ? " · gr " + c.grade : ""} · ${fmt(c.total)} pp`));
+  who.append(el("option", { value: "__new", selected: f.mode !== "student" }, "New student…"));
+  const finder = el("input", { list: "rosterlist", placeholder: "Find on roster…" });
+  finder.addEventListener("change", () => {
+    const p = state.roster.find((x) => `${x.name} (${x.teacher || "no teacher"})` === finder.value);
+    if (p) { f.mode = "student"; f.student = p.id; f.teacher = p.teacher; render(); }
+  });
+  const studentStack = el("div", { class: "stack" }, who);
+  if (f.mode !== "student") {
+    studentStack.append(el("input", { value: f.new.name, placeholder: "Full name", oninput: (e) => f.new.name = e.target.value }),
+      el("input", { value: f.new.grade, placeholder: "Grade", oninput: (e) => f.new.grade = e.target.value }));
+    if (f.new.name && !f.new.name.trim().includes(" ")) studentStack.append(el("span", { class: "hint" }, "Only a first name: the certificate will print just this."));
+  }
+  studentStack.append(finder, el("datalist", { id: "rosterlist" }, state.roster.map((p) => el("option", { value: `${p.name} (${p.teacher || "no teacher"})` }))));
+  if (f.mode === "student" && r.name) {
+    const p = state.roster.find((x) => x.id === f.student);
+    if (p && p.name.toLowerCase() !== r.name.trim().toLowerCase())
+      studentStack.append(el("label", { class: "hint" }, el("input", { type: "checkbox", checked: !!f.remember_name, onchange: (e) => f.remember_name = e.target.checked }), ` recognise "${r.name}" next time`));
+  }
+  if (s.duplicate) studentStack.append(el("select", { onchange: (e) => f.duplicate = e.target.value, title: "Second sheet for this child" },
+    el("option", { value: "sum", selected: f.duplicate !== "skip" }, "2nd sheet: add pages"),
+    el("option", { value: "skip", selected: f.duplicate === "skip" }, "2nd sheet: skip it")));
+  // teacher
+  const isOther = f.otherTeacher || (f.teacher && !state.teachers.includes(f.teacher));
+  const teacherStack = el("div", { class: "stack" }, el("select", { onchange: (e) => { f.otherTeacher = e.target.value === "__other"; f.teacher = f.otherTeacher ? "" : e.target.value; render(); } },
+    el("option", { value: "" }, "Choose…"),
+    state.teachers.map((t) => el("option", { value: t, selected: !isOther && t === f.teacher }, t)),
+    el("option", { value: "__other", selected: isOther }, "Someone else…")),
+    isOther ? el("input", { value: f.teacher, placeholder: "Teacher's name", oninput: (e) => f.teacher = e.target.value }) : null,
+    snip(s, "teacher"));
+  // pages
+  const pagesStack = el("div", { class: "stack" },
+    el("input", { type: "number", min: 0, value: f.pages ?? "", oninput: (e) => f.pages = e.target.value === "" ? null : Number(e.target.value) }),
+    snip(s, "total"));
+  checkCell.firstChild.append(el("div", { class: "actions" },
+    el("button", { class: "primary", id: "accept", onclick: (e) => { stop(e); accept(); } }, s.status === "open" ? "Accept ⏎" : "Save ⏎"),
+    el("button", { onclick: (e) => { stop(e); const why = prompt("Skip this sheet. Why?", "skipped"); if (why !== null) save({ skip: why || "skipped" }, true); } }, "Skip"),
+    Object.keys(s.decision).length ? el("button", { onclick: (e) => { stop(e); save({}, false); } }, "Reset") : null));
+  const editable = (child) => el("td", { onclick: stop }, child);
+  return el("tr", { class: "row sel", onclick: () => open(s.key) }, statusCell, el("td", { class: "muted" }, s.page), nameCell,
+    editable(studentStack), editable(teacherStack), el("td", { class: "num", onclick: stop }, pagesStack), editable(checkCell.firstChild));
 }
 
 function renderSheet() {
@@ -176,85 +263,6 @@ function renderSheet() {
   box.style.display = "block";
   box.replaceChildren(el("button", { onclick: () => { showSheet = false; renderSheet(); } }, "Close ✕"),
     el("img", { src: "/scan?key=" + encodeURIComponent(s.key) + "&t=" + TOKEN, alt: "Scanned sheet " + s.label }));
-}
-
-// ---------------------------------------------------------------- the open row
-function snip(s, field, title) {
-  if (!s.read.boxes.includes(field)) return [];
-  const img = el("img", { alt: "", title: "Click to enlarge", src: `/crop?key=${encodeURIComponent(s.key)}&field=${field}&t=${TOKEN}`,
-    onclick: (e) => { e.stopPropagation(); e.target.classList.toggle("big"); } });
-  img.addEventListener("error", () => img.remove());
-  return [el("span", { class: "hint" }, title), img];
-}
-
-function editor(s) {
-  const r = s.read;
-  const left = el("div", {},
-    el("div", { class: "snips" }, ...snip(s, "name", "Name"), ...snip(s, "teacher", "Teacher"), ...snip(s, "total", "Total"), ...snip(s, "month", "Month")),
-    el("div", { class: "hint", style: "margin-top:6px" }, `Read: ${r.name || "(no name)"} · ${r.teacher || "(no teacher)"} · ${r.month || "(no month)"} · ${fmt(r.pages)} pages`),
-    r.note ? el("div", { class: "hint" }, r.note) : null,
-    el("div", { class: "actions" }, el("button", { onclick: (e) => { e.stopPropagation(); showSheet = !showSheet; renderSheet(); } }, showSheet ? "Hide whole sheet" : "Show whole sheet"),
-      el("span", { class: "hint", style: "align-self:center" }, s.label)));
-  const right = el("div", {});
-  if (s.status === "open" && s.reasons.length) right.append(el("div", { class: "box why" }, el("ul", {}, s.reasons.map((x) => el("li", {}, x)))));
-  for (const w of s.warnings) right.append(el("div", { class: "box info" }, w));
-  if (s.status === "skipped") right.append(el("div", { class: "box info" }, s.outcome), el("div", { class: "actions" }, el("button", { class: "primary", onclick: () => save({}, false) }, "Un-skip")));
-  else right.append(formFor(s));
-  return el("div", { class: "editor", onclick: (e) => e.stopPropagation() }, left, right);
-}
-
-function formFor(s) {
-  if (!form) form = JSON.parse(JSON.stringify(s.form));
-  const f = form, cands = s.candidates.filter((c) => !c.from_hints);
-  const who = el("select", { id: "who", onchange: (e) => {
-    const v = e.target.value;
-    if (v === "__new") f.mode = "new";
-    else { f.mode = "student"; f.student = v; const p = state.roster.find((x) => x.id === v); f.teacher = p ? p.teacher : ""; }
-    render();
-  } });
-  const options = [...cands];
-  if (f.mode === "student" && f.student && !options.some((c) => c.id === f.student)) {
-    const p = state.roster.find((x) => x.id === f.student); if (p) options.unshift({ ...p, reason: "chosen" });
-  }
-  for (const c of options) who.append(el("option", { value: c.id, selected: f.mode === "student" && f.student === c.id },
-    `${c.name} · ${c.teacher || "no teacher"}${c.grade ? " · gr " + c.grade : ""} · ${fmt(c.total)} pp`));
-  who.append(el("option", { value: "__new", selected: f.mode !== "student" }, "New student…"));
-  const finder = el("input", { list: "rosterlist", placeholder: "Find someone else on the roster…" });
-  finder.addEventListener("change", () => {
-    const p = state.roster.find((x) => `${x.name} (${x.teacher || "no teacher"})` === finder.value);
-    if (p) { f.mode = "student"; f.student = p.id; f.teacher = p.teacher; render(); }
-  });
-  const datalist = el("datalist", { id: "rosterlist" }, state.roster.map((p) => el("option", { value: `${p.name} (${p.teacher || "no teacher"})` })));
-  const isOther = f.otherTeacher || (f.teacher && !state.teachers.includes(f.teacher));
-  const teacher = el("select", { onchange: (e) => { f.otherTeacher = e.target.value === "__other"; f.teacher = f.otherTeacher ? "" : e.target.value; render(); } },
-    el("option", { value: "" }, "Choose a teacher…"),
-    state.teachers.map((t) => el("option", { value: t, selected: !isOther && t === f.teacher }, t)),
-    el("option", { value: "__other", selected: isOther }, "Someone else…"));
-  const other = isOther ? el("input", { value: f.teacher, placeholder: "Teacher's name", oninput: (e) => f.teacher = e.target.value }) : null;
-  const rows = [el("label", {}, "Student"), el("div", { class: "full" }, who), el("label", {}, ""), el("div", { class: "full" }, finder, datalist)];
-  if (f.mode !== "student") {
-    rows.push(el("label", {}, "Name"), el("div", { class: "full" },
-      el("input", { value: f.new.name, placeholder: "Full name", oninput: (e) => f.new.name = e.target.value }),
-      el("input", { value: f.new.grade, placeholder: "Grade", style: "max-width:80px;flex:none", oninput: (e) => f.new.grade = e.target.value })));
-    if (f.new.name && !f.new.name.trim().includes(" ")) rows.push(el("label", {}, ""), el("div", { class: "hint" }, "Only a first name: the certificate will print just this."));
-  }
-  rows.push(el("label", {}, "Teacher"), el("div", { class: "full" }, teacher, other));
-  rows.push(el("label", {}, "Pages"), el("div", { class: "full" },
-    el("input", { type: "number", min: 0, value: f.pages ?? "", style: "max-width:140px", oninput: (e) => f.pages = e.target.value === "" ? null : Number(e.target.value) })));
-  if (f.mode === "student" && s.read.name) {
-    const p = state.roster.find((x) => x.id === f.student);
-    if (p && p.name.toLowerCase() !== s.read.name.trim().toLowerCase())
-      rows.push(el("label", {}, ""), el("label", { class: "hint" }, el("input", { type: "checkbox", checked: !!f.remember_name, onchange: (e) => f.remember_name = e.target.checked }), ` also recognise "${s.read.name}" as ${p.name} next time`));
-  }
-  if (s.duplicate) rows.push(el("label", {}, "2nd sheet"), el("div", { class: "full" },
-    el("select", { onchange: (e) => f.duplicate = e.target.value },
-      el("option", { value: "sum", selected: f.duplicate !== "skip" }, "add the pages to the other sheet"),
-      el("option", { value: "skip", selected: f.duplicate === "skip" }, "skip this one (same sheet twice)"))));
-  return el("div", {}, el("div", { class: "grid" }, rows),
-    el("div", { class: "actions" },
-      el("button", { class: "primary", id: "accept", onclick: accept }, s.status === "open" ? "Accept ⏎" : "Save ⏎"),
-      el("button", { onclick: () => { const why = prompt("Skip this sheet. Why?", "skipped"); if (why !== null) save({ skip: why || "skipped" }, true); } }, "Skip sheet"),
-      Object.keys(s.decision).length ? el("button", { onclick: () => save({}, false) }, "Reset") : null));
 }
 
 function accept() {

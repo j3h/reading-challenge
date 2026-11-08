@@ -23,8 +23,9 @@ from rc import matching as mt
 from rc import review as rv
 from rc import runner
 
-PAGE = Path(__file__).with_name("review.html")
-PAGE_TABLE = Path(__file__).with_name("review_table.html")    # experimental table view: /?view=table
+PAGE_TABLE = Path(__file__).with_name("review_table.html")    # the review screen (a table, one row per sheet)
+PAGE_CARDS = Path(__file__).with_name("review.html")          # older one-sheet-at-a-time view: /?view=cards
+PAGE = PAGE_TABLE
 IMAGE_DPI = 110
 STATUS_OPEN, STATUS_AUTO, STATUS_DECIDED, STATUS_SKIPPED = "open", "auto", "decided", "skipped"
 
@@ -231,7 +232,7 @@ def make_server(app: ReviewApp, port: int = 0) -> tuple[ThreadingHTTPServer, str
             if not self._host_ok():
                 return self._json(403, {"error": "bad host"})
             if url.path == "/":
-                page = PAGE_TABLE if (query.get("view") or [""])[0] == "table" and PAGE_TABLE.exists() else PAGE
+                page = PAGE_CARDS if (query.get("view") or [""])[0] == "cards" else PAGE_TABLE
                 html = page.read_text(encoding="utf-8").replace("__TOKEN__", token)
                 return self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
             if not self._authorised(query):
