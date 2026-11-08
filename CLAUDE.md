@@ -61,3 +61,21 @@ from a CSV of children's page counts. Replaces a Canva "bulk create" workflow; w
 - **Privacy:** the real CSVs contain children's names. `.gitignore` excludes every `*.csv`
   except `sample.csv` and `levels.csv`, plus `out/` and generated PDFs. Never commit real
   names or output; keep `sample.csv` to made-up or already-public data.
+
+## New pipeline (`rc/`, in progress): scans -> checkpoint + classroom print PDF
+Replaces the CSV/tracker flow. Built backwards from the printout; all pieces below exist and are tested
+except extraction (OCR), the review UI and the one-command runner.
+- `rc/checkpoint.py`  students, running totals, `last_level` (highest prize given); `apply_month()`;
+  xlsx save/load. A month is applied once and only after the previous one. Every student needs a teacher.
+- `rc/render.py`      print PDF: per teacher a cover page (prize tally + bagging checklist), then that
+  class's certificates (drawn by `make_certificates.draw_certificate`, unchanged). Letter landscape.
+- `rc/import_master.py` one-time: master spreadsheet printed to PDF -> first checkpoint. The "x" prize
+  marks set `last_level`; no x means the prize is owed. Cross-checked against totals in its report.
+- `rc/workspace.py`   data folder (outside git, e.g. iCloud Drive): `<season>/<month>/{scans,work,
+  checkpoint.xlsx,certificates.pdf,summary.txt}`. **Totals reset every school year (July-June)**; a new
+  season starts with no checkpoint, and last season's final one is used only as name/teacher hints.
+- `rc/matching.py`    sheet name + teacher -> student: exact / likely / ambiguous / hint / none.
+- `rc/review.py`      turns extracted sheet records + a person's decisions into entries; nothing is settled
+  silently unless the name matches exactly and every field was read confidently.
+- Tests use made-up children only. Run with `.venv/bin/python -m pytest -q` (Python via `uv`, see below).
+- Python: the system `python3` shim is broken on this Mac; use `uv venv .venv && uv pip install -r requirements.txt`.
