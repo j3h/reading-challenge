@@ -215,10 +215,35 @@ def parse_master(pdf_path, table=None):
     return cp, report
 
 
+def questions_for_staff(cp, report) -> str:
+    """A plain-text list to take to whoever keeps the master sheet (names are real: keep it out of git)."""
+    red = [s for s in cp.students.values() if "red" in s.notes]
+    none = [s for s in cp.students.values() if not s.teacher]
+    marks = [r for r in report if "marked as given up to" in r]
+    owed = [r for r in report if "no x yet" in r]
+    teachers = Counter(s.teacher for s in cp.students.values() if s.teacher)
+    out = ["Questions about the master sheet", "=" * 32, ""]
+    out += [f"1. {len(red)} students have their teacher/grade in red. What does red mean (e.g. last year's class, "
+            f"or total out of date)?"]
+    out += [f"     {s.name} - {s.teacher or '(no teacher)'} - grade {s.grade or '?'} - {s.total:,} pages" for s in
+            sorted(red, key=lambda s: s.name)]
+    out += ["", f"2. {len(none)} students have no teacher. Who are their teachers this year?"]
+    out += [f"     {s.name} - grade {s.grade or '?'}" for s in sorted(none, key=lambda s: s.name)]
+    out += ["", f"3. {len(marks)} students are marked as given a prize beyond their total (total or marks wrong?):"]
+    out += [f"     {r}" for r in marks]
+    out += ["", f"4. {len(owed)} students passed a level with no x. Should they still be given that prize (no x = owed)?"]
+    out += [f"     {r}" for r in owed]
+    out += ["", "5. Teacher names as they appear (should any be merged, e.g. Biello and Biello/Tanner?):",
+            "     " + ", ".join(f"{t} ({n})" for t, n in sorted(teachers.items()))]
+    return "\n".join(out) + "\n"
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("pdf", help="master spreadsheet printed to PDF")
     ap.add_argument("--out", required=True, help="checkpoint .xlsx to write (keep it out of git)")
+    ap.add_argument("--questions", help="also write a plain-text list of questions about the master "
+                                        "(for whoever keeps it); it contains real names, keep it out of git")
     args = ap.parse_args(argv)
     try:
         cp, report = parse_master(args.pdf)
@@ -233,6 +258,9 @@ def main(argv=None):
         print(f"\n{len(report)} things to look at:")
         for line in report:
             print("  -", line)
+    if args.questions:
+        Path(args.questions).write_text(questions_for_staff(cp, report), encoding="utf-8")
+        print(f"\nQuestions for staff written to {args.questions}")
 
 
 if __name__ == "__main__":

@@ -120,12 +120,12 @@ def find_by_name(cp: Checkpoint, name: str, include_left: bool = False) -> list[
             if " ".join(s.name.lower().split()) == key and (include_left or s.status == ACTIVE)]
 
 
-def validate(cp: Checkpoint) -> list[str]:
+def validate(cp: Checkpoint, require_teacher: bool = True) -> list[str]:
     """Problems that should be fixed before a checkpoint is used. Empty list means fine."""
     problems = []
     seen = {}
     for s in cp.students.values():
-        if not s.teacher.strip():
+        if require_teacher and not s.teacher.strip():
             problems.append(f"{s.id} {s.name}: no teacher")
         if s.status not in (ACTIVE, LEFT):
             problems.append(f"{s.id} {s.name}: status {s.status!r} is not active/left")
@@ -182,7 +182,10 @@ def apply_month(cp: Checkpoint, month: str, entries: list[Entry], table) -> tupl
         seen.add(e.student_id)
         if e.pages < 0:
             problems.append(f"entry {e.source or e.student_id}: negative pages")
-    problems += validate(cp)
+        if e.student_id in cp.students and not cp.students[e.student_id].teacher.strip():
+            problems.append(f"{cp.students[e.student_id].name}: no teacher, so no classroom to put them in")
+    # Students with no sheet this month may still lack a teacher; they are carried forward and reported.
+    problems += validate(cp, require_teacher=False)
     if problems:
         raise CheckpointError("; ".join(problems))
 

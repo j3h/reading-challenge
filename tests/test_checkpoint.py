@@ -119,8 +119,12 @@ def test_validate_catches_missing_teacher_and_duplicates(cp):
     cp.students["S0010"] = ck.Student("S0010", "No Teacher", "")
     problems = ck.validate(cp)
     assert any("duplicate" in p for p in problems) and any("no teacher" in p for p in problems)
-    with pytest.raises(ck.CheckpointError, match="no teacher"):
+    with pytest.raises(ck.CheckpointError, match="duplicate"):
         ck.apply_month(cp, "2026-10", [], TABLE)
+    del cp.students["S0009"]
+    ck.apply_month(cp, "2026-10", [], TABLE)      # a missing teacher only matters for children with a sheet
+    with pytest.raises(ck.CheckpointError, match="no teacher"):
+        ck.apply_month(cp, "2026-10", [ck.Entry("S0010", 5)], TABLE)
 
 
 def test_classrooms_grouped_by_teacher_then_name(cp):

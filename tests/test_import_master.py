@@ -135,10 +135,11 @@ def test_red_text_is_kept_as_a_note(master):
     assert "red" in by_name(cp)["Io Li"].notes and by_name(cp)["Ada Example"].notes == ""
 
 
-def test_missing_teacher_blocks_the_first_month_until_fixed(master):
+def test_a_child_without_a_teacher_cannot_get_a_certificate_until_fixed(master):
     cp, _ = im.parse_master(master, TABLE)
+    ck.apply_month(cp, "October 2026", [ck.Entry("S0001", 5)], TABLE)          # has a teacher: fine
     with pytest.raises(ck.CheckpointError, match="no teacher"):
-        ck.apply_month(cp, "October 2026", [], TABLE)
+        ck.apply_month(cp, "October 2026", [ck.Entry("S0003", 5)], TABLE)      # Sam Sample has none
 
 
 def test_imported_checkpoint_round_trips_through_xlsx(master, tmp_path):
@@ -168,3 +169,14 @@ def test_cli_writes_a_checkpoint_and_prints_a_summary(master, tmp_path, capsys):
     printed = capsys.readouterr().out
     assert "Imported 6 students" in printed and "Lopez (1)" in printed and "(none) (1)" in printed
     assert out.exists()
+
+
+def test_questions_for_staff_lists_red_rows_and_missing_teachers(master, tmp_path):
+    cp, report = im.parse_master(master, TABLE)
+    text = im.questions_for_staff(cp, report)
+    assert "Io Li - Biello/Tanner - grade K - 74 pages" in text       # the red row
+    assert "Sam Sample - grade 4" in text                              # no teacher
+    assert "Cy Late: marked as given up to 2,500" in text
+    out = tmp_path / "q.txt"
+    im.main([str(master), "--out", str(tmp_path / "s.xlsx"), "--questions", str(out)])
+    assert out.read_text() == text
