@@ -157,9 +157,13 @@ def _marks_near(marks, y):
     return set()
 
 
-def parse_master(pdf_path, table=None):
-    """Return (checkpoint, report lines). The checkpoint has month None and last_level taken from the x marks."""
+def parse_master(pdf_path, table=None, teacher_aliases=None):
+    """Return (checkpoint, report lines). The checkpoint has month None and last_level taken from the x marks.
+
+    `teacher_aliases` maps a teacher as written in the master to the name to use ({'Biello/Tanner': 'Biello'}),
+    e.g. when two teachers became one class."""
     table = table or mc.load_levels()
+    aliases = {k.strip().lower(): v.strip() for k, v in (teacher_aliases or {}).items()}
     doc = pymupdf.open(pdf_path)
     cell_pages = [_lines(p)[0] for p in doc]
     group1 = [i for i, c in enumerate(cell_pages) if _is_teacher_header_page(c)]
@@ -186,6 +190,7 @@ def parse_master(pdf_path, table=None):
                     raise ImportProblem(f"page {page_no + 1}: row for {name!r} (detail page {k + 1}) shows "
                                         f"{there!r}; the page groups do not line up")
         for y, name, teacher, grade, total_text, was_red in students:
+            teacher = aliases.get(teacher.strip().lower(), teacher)
             seen_names[name] += 1
             given = _marks_near(early, y) | _marks_near(late, y)
             try:
@@ -242,11 +247,19 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("pdf", help="master spreadsheet printed to PDF")
     ap.add_argument("--out", required=True, help="checkpoint .xlsx to write (keep it out of git)")
+    ap.add_argument("--teacher-alias", action="append", default=[], metavar="OLD=NEW",
+                    help='use NEW wherever the master says OLD, e.g. "Biello/Tanner=Biello" (repeatable)')
     ap.add_argument("--questions", help="also write a plain-text list of questions about the master "
                                         "(for whoever keeps it); it contains real names, keep it out of git")
     args = ap.parse_args(argv)
+    aliases = {}
+    for a in args.teacher_alias:
+        old, sep, new = a.partition("=")
+        if not sep or not old.strip() or not new.strip():
+            sys.exit(f"--teacher-alias needs OLD=NEW, got {a!r}")
+        aliases[old] = new
     try:
-        cp, report = parse_master(args.pdf)
+        cp, report = parse_master(args.pdf, teacher_aliases=aliases)
     except (ck.CheckpointError, OSError, RuntimeError) as e:
         sys.exit(str(e))
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)

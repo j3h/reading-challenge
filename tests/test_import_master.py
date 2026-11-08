@@ -180,3 +180,13 @@ def test_questions_for_staff_lists_red_rows_and_missing_teachers(master, tmp_pat
     out = tmp_path / "q.txt"
     im.main([str(master), "--out", str(tmp_path / "s.xlsx"), "--questions", str(out)])
     assert out.read_text() == text
+
+
+def test_teacher_alias_merges_two_labels_into_one_class(master, tmp_path):
+    cp, _ = im.parse_master(master, TABLE, teacher_aliases={"biello/tanner": "Biello"})
+    assert by_name(cp)["Io Li"].teacher == "Biello" and by_name(cp)["Ada Example"].teacher == "Lopez"
+    out = tmp_path / "s.xlsx"
+    im.main([str(master), "--out", str(out), "--teacher-alias", "Biello/Tanner=Biello"])
+    assert ck.load(out).students["S0002"].teacher == "Biello"
+    with pytest.raises(SystemExit, match="OLD=NEW"):
+        im.main([str(master), "--out", str(out), "--teacher-alias", "nonsense"])

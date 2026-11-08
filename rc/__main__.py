@@ -86,7 +86,10 @@ def cmd_import(args):
     out = wsp_.root / season / "start" / wsp.CHECKPOINT
     if out.exists() and not args.replace:
         sys.exit(f"{out} already exists; use --replace to overwrite it")
-    import_master.main([args.pdf, "--out", str(out)] + (["--questions", args.questions] if args.questions else []))
+    extra = (["--questions", args.questions] if args.questions else [])
+    for a in args.teacher_alias:
+        extra += ["--teacher-alias", a]
+    import_master.main([args.pdf, "--out", str(out)] + extra)
 
 
 def main(argv=None):
@@ -115,6 +118,8 @@ def main(argv=None):
     p.add_argument("pdf")
     p.add_argument("--season", required=True, help='e.g. "2026-27"')
     p.add_argument("--questions", help="also write a plain-text list of questions about the master")
+    p.add_argument("--teacher-alias", action="append", default=[], metavar="OLD=NEW",
+                   help='use NEW wherever the master says OLD, e.g. "Biello/Tanner=Biello" (repeatable)')
     p.add_argument("--replace", action="store_true")
     p.set_defaults(fn=cmd_import)
     args = ap.parse_args(argv)
