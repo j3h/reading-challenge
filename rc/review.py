@@ -12,12 +12,12 @@ apply. Nothing is ever settled silently except an exact name match with every fi
 Decisions, keyed by sheet ("<file>#<page>"):
     {"student": "S0003"}                          this sheet is that student
     {"remember_name": true}                       (with student) also match the name as written next time
-    {"teacher": "Moren"}                          teacher for an existing student who has none on file
     {"new_student": {"name":..., "teacher":..., "grade":..., "total": 0}}   add a student
     {"skip": "reason"}                            ignore this sheet
     {"pages": 120}                                use this page count (overrides the read one)
     {"pages_ok": true}                            the read page count is right (for low confidence)
-    {"month_ok": true}                            sheet month differs from the batch but count it anyway
+    {"teacher": "Moren"}                          (with an existing student) their teacher now: fills a missing
+                                                  teacher or records a class change
     {"duplicate": "sum" | "skip"}                 a second sheet for a child already seen this month
 """
 from __future__ import annotations
@@ -73,6 +73,7 @@ class Settled:
     pages: int | None = None
     skipped: str = ""
     merged_from: list = field(default_factory=list)   # extra sheets summed into this one
+    warnings: list = field(default_factory=list)      # shown to the person, never block (e.g. month on the sheet)
 
 
 @dataclass
@@ -137,9 +138,13 @@ def sheet_month_matches(written: str, batch: str) -> bool:
         return month == want_month and (year is None or (2000 + int(year) if len(year) == 2 else int(year)) == want_year)
     m = re.fullmatch(r"(\d{1,2})\s*[/\-]\s*(\d{1,2})(?:\s*[/\-]\s*(\d{4}|\d{2}))?", text)   # M/D or M/D/Y (US order)
     if m:
-        year = m.group(3)
-        return int(m.group(1)) == want_month and (
-            year is None or (2000 + int(year) if len(year) == 2 else int(year)) == want_year)
+        month, day, year = int(m.group(1)), int(m.group(2)), m.group(3)
+        year = None if year is None else (2000 + int(year) if len(year) == 2 else int(year))
+        if month == want_month and year in (None, want_year):
+            return True
+        # handed in during the first days of the next month: that is still this month's total
+        nxt_month, nxt_year = (1, want_year + 1) if want_month == 12 else (want_month + 1, want_year)
+        return month == nxt_month and day <= 7 and year in (None, nxt_year)
     return False
 
 
@@ -193,10 +198,10 @@ def plan(records: list[SheetRecord], cp: ck.Checkpoint, batch_month: str, decisi
                                                 f" - {why}", m.candidates))
 
         # a classroom is needed for the certificate: the operator has to look it up (no automated source)
-        if item.student_id and not cp.students[item.student_id].teacher.strip():
-            if d.get("teacher", "").strip():
+        if item.student_id and (d.get("teacher") or "").strip():
+            if d["teacher"].strip() != cp.students[item.student_id].teacher:
                 item.set_teacher = d["teacher"].strip()
-            else:
+        elif item.student_id and not cp.students[item.student_id].teacher.strip():
                 issues.append(Issue(rec.key, "teacher",
                                     f"{rec.label}: {cp.students[item.student_id].name} has no teacher on file; "
                                     f"look it up and enter it", tuple(teachers)))
@@ -218,10 +223,9 @@ def plan(records: list[SheetRecord], cp: ck.Checkpoint, batch_month: str, decisi
         if item.pages is not None and item.pages < 0:
             issues.append(Issue(rec.key, "pages", f"{rec.label}: pages cannot be negative"))
 
-        # the right month?
-        if rec.month and not d.get("month_ok") and not sheet_month_matches(rec.month, batch):
-            issues.append(Issue(rec.key, "month", f"{rec.label}: sheet says {rec.month!r}, batch is "
-                                                  f"{ck.month_label(batch)}"))
+        # the month on the sheet is often wrong or a date; the batch month is used, a mismatch is only shown
+        if rec.month and not sheet_month_matches(rec.month, batch):
+            item.warnings.append(f"sheet says {rec.month!r}; counted for {ck.month_label(batch)}")
         settled.append(item)
 
     # two sheets for the same child
@@ -246,7 +250,8 @@ def plan(records: list[SheetRecord], cp: ck.Checkpoint, batch_month: str, decisi
             who = cp.students[item.student_id].name if item.student_id else item.new_student["name"]
             issues.append(Issue(item.record.key, "duplicate",
                                 f"{item.record.label}: {who} already has {first[ident].record.label} this month "
-                                f"({first[ident].pages} vs {item.pages} pages): add them together, or skip this one?"))
+                                f"({first[ident].pages} vs {item.pages} pages): add them together, or skip this one?",
+                                (first[ident].pages, item.pages)))
     return Plan(settled, issues, matches)
 
 
@@ -269,7 +274,8 @@ def finalize(p: Plan, cp: ck.Checkpoint, table=None) -> tuple[ck.Checkpoint, lis
         if item.student_id and item.set_teacher and not item.skipped:
             old = cp.students[item.student_id]
             cp.students[old.id] = ck.replace(old, teacher=item.set_teacher)
-            notes.append(f"teacher for {old.name} set to {item.set_teacher} ({item.record.label})")
+            change = f"changed from {old.teacher} to" if old.teacher else "set to"
+            notes.append(f"teacher for {old.name} {change} {item.set_teacher} ({item.record.label})")
     for item in p.settled:
         rec = item.record
         if item.skipped:
@@ -288,3 +294,77 @@ def finalize(p: Plan, cp: ck.Checkpoint, table=None) -> tuple[ck.Checkpoint, lis
         source = ", ".join([rec.label] + [r.label for r in item.merged_from])
         entries.append(ck.Entry(sid, item.pages, source))
     return cp, entries, notes
+
+
+# ------------------------------------------------------------------ suggestions
+@dataclass
+class Suggestion:
+    """What the review screen pre-fills for a sheet that needs a look, and why it needs one."""
+    decision: dict | None     # accepting this as-is settles the sheet; None if a person must fill something in
+    reasons: list             # short, plain reasons the sheet was not settled automatically
+    draft: dict = field(default_factory=dict)   # the same suggestion, possibly incomplete, for pre-filling a form
+
+
+def teacher_guess(written: str, teachers) -> str:
+    """The roster teacher the sheet's teacher most likely means ('Ms. Tracy' -> 'Tracy'), or ''."""
+    return next((t for t in teachers if mt.teacher_agreement(written, t) == "agree"), "")
+
+
+def suggest(p: Plan, cp: ck.Checkpoint, decisions: dict) -> dict[str, Suggestion]:
+    """A suggested decision for every sheet that still has a question."""
+    teachers = sorted({s.teacher for s in cp.students.values() if s.teacher})
+    by_key: dict[str, list] = {}
+    for i in p.issues:
+        by_key.setdefault(i.key, []).append(i)
+    out = {}
+    for item in p.settled:
+        rec, issues = item.record, by_key.get(item.record.key, [])
+        if item.skipped or not issues:
+            continue
+        d = dict(decisions.get(rec.key, {}))
+        reasons, complete = [], True
+        m = p.matches.get(rec.key)
+        guess = teacher_guess(rec.teacher, teachers)
+        kinds = {i.kind for i in issues}
+        if "student" in d or "new_student" in d:
+            pass                                     # the person already chose who; keep it
+        elif m and m.candidates and not m.candidates[0].from_hints:
+            best = m.candidates[0]
+            d["student"] = best.student.id
+            d["remember_name"] = not best.reason.startswith(("same name", "same words"))
+            others = [c for c in m.candidates[1:] if not c.from_hints and c.score >= best.score - 0.1]
+            reasons.append(f"{best.reason}" + (f"; could also be {others[0].student.name}" if others else ""))
+        else:
+            hint = m.candidates[0].student if m and m.candidates else None
+            d["new_student"] = {"name": hint.name if hint else rec.name, "teacher": guess,
+                                "grade": hint.grade if hint else ""}
+            reasons.append("on last year's roster: add as new" if hint else "not on the roster: add as a new student")
+            if not guess:
+                complete = False
+                reasons.append(f"choose a teacher (sheet says {rec.teacher!r})" if rec.teacher else "choose a teacher")
+            if not d["new_student"]["name"]:
+                complete = False
+                reasons.append("type the child's name")
+        if "student" in d and d["student"] in cp.students and not cp.students[d["student"]].teacher and not d.get("teacher"):
+            if guess:
+                d["teacher"] = guess
+                reasons.append(f"no teacher on file: using {guess} from the sheet")
+            else:
+                complete = False
+                reasons.append("no teacher on file: choose one")
+        if "pages" not in d:
+            if rec.pages is None:
+                complete = False
+                reasons.append("type the pages: the total could not be read")
+            else:
+                d["pages"] = rec.pages
+                if "pages" in kinds:
+                    reasons.append(f"page count unsure" + (f": {rec.note}" if rec.note else ""))
+        if "duplicate" in kinds and "duplicate" not in d:
+            dup = next(i for i in issues if i.kind == "duplicate")
+            first_pages, this_pages = (dup.candidates + (None, None))[:2]
+            d["duplicate"] = "skip" if first_pages == this_pages else "sum"
+            reasons.append("second sheet for this child: " + ("looks like the same sheet twice, skip it"
+                                                                if d["duplicate"] == "skip" else "add the pages together"))
+        out[rec.key] = Suggestion(d if complete else None, reasons or [i.message for i in issues], d)
+    return out

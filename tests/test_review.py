@@ -93,12 +93,12 @@ def test_low_confidence_pages_can_be_confirmed_or_overridden(cp):
     assert rv.plan(records, cp, "October 2026", {"oct.pdf#1": {"pages": 2300}}).settled[0].pages == 2300
 
 
-def test_wrong_month_on_the_sheet_is_flagged(cp):
+def test_a_wrong_month_on_the_sheet_is_only_a_warning_and_the_batch_month_is_used(cp):
     records = [rec(1, "Ada Example", "Lopez", 30, month="September 2026"), rec(2, "Io Li", "Park", 5, month="")]
-    assert kinds(rv.plan(records, cp, "October 2026", {})) == [("oct.pdf#1", "month")]
-    assert rv.plan(records, cp, "October 2026", {"oct.pdf#1": {"month_ok": True}}).ready
-    assert rv.plan([rec(1, "Ada Example", "Lopez", 30, month="9/19")], cp, "October 2026", {}).issues[0].kind == "month"
-    assert rv.plan([rec(1, "Ada Example", "Lopez", 30, month="October")], cp, "October 2026", {}).ready
+    p = rv.plan(records, cp, "October 2026", {})
+    assert p.ready
+    assert p.settled[0].warnings == ["sheet says 'September 2026'; counted for October 2026"] and p.settled[1].warnings == []
+    assert rv.plan([rec(1, "Ada Example", "Lopez", 30, month="October")], cp, "October 2026", {}).settled[0].warnings == []
 
 
 def test_skipping_a_sheet_settles_it_and_is_reported(cp):
@@ -191,6 +191,8 @@ def test_a_skipped_sheet_does_not_need_a_teacher_looked_up(cp):
     ("2026-10", True),
     ("September", False), ("9/19", False), ("Sept 2026", False), ("October 2025", False), ("10/5/25", False),
     ("Octobre", False), ("", False), ("last month", False), ("Ma", False),
+    ("11/2", True), ("11/1/26", True), ("11/7/2026", True),          # handed in early next month: still October
+    ("11/8", False), ("11/2/25", False), ("12/1", False),
 ])
 def test_what_a_child_writes_for_the_month_is_compared_by_month_and_year(written, ok):
     assert rv.sheet_month_matches(written, "October 2026") is ok
@@ -213,3 +215,62 @@ def test_remembering_a_written_name_makes_next_month_exact(cp):
     same = rv.plan([rec(1, "Io Li", "Park", 5)], cp, "October 2026",
                    {"oct.pdf#1": {"student": "S0003", "remember_name": True}})
     assert rv.finalize(same, cp, TABLE)[0].students["S0003"].nicknames == ""   # the real name is not a nickname
+
+
+def test_a_teacher_decision_records_a_class_change(cp):
+    p = rv.plan([rec(1, "Ada Example", "Lopez", 30)], cp, "October 2026", {"oct.pdf#1": {"student": "S0001", "teacher": "Park"}})
+    cp2, _, notes = rv.finalize(p, cp, TABLE)
+    assert cp2.students["S0001"].teacher == "Park" and any("changed from Lopez to Park" in n for n in notes)
+    same = rv.plan([rec(1, "Ada Example", "Lopez", 30)], cp, "October 2026", {"oct.pdf#1": {"student": "S0001", "teacher": "Lopez"}})
+    assert not any("teacher" in n for n in rv.finalize(same, cp, TABLE)[2])
+
+
+def sug(records, cp, decisions=None, hints=None):
+    decisions = decisions or {}
+    p = rv.plan(records, cp, "October 2026", decisions, hints)
+    return rv.suggest(p, cp, decisions)
+
+
+def test_suggestion_for_a_likely_match_settles_it_when_accepted(cp):
+    records = [rec(1, "Sam Sampel", "Park", 12)]
+    s = sug(records, cp)["oct.pdf#1"]
+    assert s.decision == {"student": "S0002", "remember_name": True, "pages": 12}
+    assert rv.plan(records, cp, "October 2026", {"oct.pdf#1": s.decision}).ready
+
+
+def test_suggestion_for_an_unknown_child_is_a_new_student_with_the_guessed_teacher(cp):
+    s = sug([rec(1, "Quentin Quimby", "Ms. Park", 40)], cp)["oct.pdf#1"]
+    assert s.decision == {"new_student": {"name": "Quentin Quimby", "teacher": "Park", "grade": ""}, "pages": 40}
+    assert "not on the roster" in s.reasons[0]
+
+
+def test_no_suggestion_when_the_teacher_or_pages_cannot_be_guessed(cp):
+    s = sug([rec(1, "Quentin Quimby", "Mr. Nobody", 40)], cp)["oct.pdf#1"]
+    assert s.decision is None and s.draft["new_student"]["teacher"] == "" and any("teacher" in r for r in s.reasons)
+    s = sug([rec(1, "Sam Sampel", "Park", None)], cp)["oct.pdf#1"]
+    assert s.decision is None and any("pages" in r for r in s.reasons)
+
+
+def test_suggestion_confirms_an_unsure_page_count(cp):
+    s = sug([rec(1, "Ada Example", "Lopez", 158, pages_confidence=rv.LOW, note="two totals: 158 vs 2,300")], cp)["oct.pdf#1"]
+    assert s.decision["pages"] == 158 and any("two totals" in r for r in s.reasons)
+
+
+def test_suggestion_fills_a_missing_teacher_from_the_sheet(cp):
+    cp.students["S0002"] = ck.replace(cp.students["S0002"], teacher="")
+    s = sug([rec(1, "Sam Sample", "Ms. Lopez", 5)], cp)["oct.pdf#1"]
+    assert s.decision["teacher"] == "Lopez" and any("no teacher on file" in r for r in s.reasons)
+
+
+def test_suggestion_for_a_second_sheet(cp):
+    same = [rec(1, "Ada Example", "Lopez", 30), rec(2, "Ada Example", "Lopez", 30)]
+    assert sug(same, cp)["oct.pdf#2"].decision["duplicate"] == "skip"
+    more = [rec(1, "Ada Example", "Lopez", 30), rec(2, "Ada Example", "Lopez", 20)]
+    assert sug(more, cp)["oct.pdf#2"].decision["duplicate"] == "sum"
+
+
+def test_suggestion_uses_last_years_name_and_grade(cp):
+    last_year = ck.Checkpoint()
+    ck.add_student(last_year, "Quentin Quimby", "Old Teacher", "1")
+    s = sug([rec(1, "Quentin", "Park", 5)], cp, hints=last_year)["oct.pdf#1"]
+    assert s.decision["new_student"] == {"name": "Quentin Quimby", "teacher": "Park", "grade": "1"}

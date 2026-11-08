@@ -25,7 +25,7 @@ from rc import runner
 
 PAGE = Path(__file__).with_name("review.html")
 IMAGE_DPI = 110
-STATUS_OPEN, STATUS_DONE, STATUS_SKIPPED = "open", "done", "skipped"
+STATUS_OPEN, STATUS_AUTO, STATUS_DECIDED, STATUS_SKIPPED = "open", "auto", "decided", "skipped"
 
 
 class ReviewApp:
@@ -47,39 +47,63 @@ class ReviewApp:
         cp, source = m.previous()
         plan = m.plan()
         decisions = m.decisions()
-        by_key: dict[str, list] = {}
-        for i in plan.issues:
-            by_key.setdefault(i.key, []).append({"kind": i.kind, "message": i.message})
+        suggestions = rv.suggest(plan, cp, decisions)
         teachers = sorted({s.teacher for s in cp.students.values() if s.teacher})
+        open_keys = {i.key for i in plan.issues}
         sheets = []
         for item in plan.settled:
             r = item.record
-            issues = by_key.get(r.key, [])
-            status = STATUS_SKIPPED if item.skipped else STATUS_OPEN if issues else STATUS_DONE
+            d = decisions.get(r.key, {})
+            sug = suggestions.get(r.key)
+            if item.skipped:
+                status = STATUS_SKIPPED
+            elif r.key in open_keys:
+                status = STATUS_OPEN
+            else:
+                status = STATUS_DECIDED if d else STATUS_AUTO
             match = plan.matches.get(r.key)
             sheets.append({
                 "key": r.key, "label": r.label, "file": r.file, "page": r.page,
                 "read": {"name": r.name, "teacher": r.teacher, "month": r.month, "pages": r.pages,
                          "confidence": r.confidence, "pages_confidence": r.pages_confidence, "note": r.note},
-                "status": status, "issues": issues, "decision": decisions.get(r.key, {}),
-                "outcome": self._outcome(item, cp),
+                "status": status, "decision": d, "outcome": self._outcome(item, cp),
+                "warnings": item.warnings,
+                "reasons": sug.reasons if sug else [],
+                "can_accept": bool(sug and sug.decision),
+                "form": self._form(item, cp, d, sug),
                 "candidates": [self._cand(c) for c in (match.candidates[:6] if match else [])],
-                "match_status": match.status if match else mt.NONE,
-                # the roster teacher the sheet's teacher most likely means ("Ms. Tracy" -> "Tracy")
-                "teacher_guess": next((t for t in teachers if mt.teacher_agreement(r.teacher, t) == "agree"), ""),
+                "duplicate": any(i.kind == "duplicate" and i.key == r.key for i in plan.issues) or "duplicate" in d,
             })
-        order = {STATUS_OPEN: 0, STATUS_DONE: 1, STATUS_SKIPPED: 2}
+        counts = {k: sum(1 for s in sheets if s["status"] == k)
+                  for k in (STATUS_OPEN, STATUS_AUTO, STATUS_DECIDED, STATUS_SKIPPED)}
         return {
             "finished": False, "month": ck.month_label(m.folder.month), "source": source,
-            "ready": plan.ready and any(s["status"] == STATUS_DONE for s in sheets),
-            "counts": {k: sum(1 for s in sheets if s["status"] == k) for k in order},
-            "sheets": sheets,
-            "teachers": teachers,
+            "ready": plan.ready and any(s["status"] in (STATUS_AUTO, STATUS_DECIDED) for s in sheets),
+            "counts": counts, "acceptable": sum(1 for s in sheets if s["status"] == STATUS_OPEN and s["can_accept"]),
+            "sheets": sheets, "teachers": teachers,
             "roster": [{"id": s.id, "name": s.name, "teacher": s.teacher, "grade": s.grade,
                         "nicknames": s.nicknames, "total": s.total}
                        for s in sorted(cp.students.values(), key=lambda s: s.name.lower())
                        if s.status == ck.ACTIVE],
         }
+
+    @staticmethod
+    def _form(item, cp, d, sug) -> dict:
+        """What the sheet's form shows: the person's decision, else what was settled, else the suggestion."""
+        src = d if ("student" in d or "new_student" in d) else (sug.draft if sug else {})
+        form = {"mode": "", "student": "", "new": {"name": item.record.name, "grade": ""}, "teacher": "",
+                "pages": d.get("pages", item.pages if item.pages is not None else (sug.draft.get("pages") if sug else None)),
+                "remember_name": bool(src.get("remember_name")), "duplicate": d.get("duplicate") or
+                (sug.draft.get("duplicate") if sug else "") or ""}
+        sid = src.get("student") or item.student_id
+        if sid and sid in cp.students:
+            form.update(mode="student", student=sid, teacher=src.get("teacher") or cp.students[sid].teacher
+                        or ((sug.draft.get("teacher") or "") if sug and sug.draft.get("student") == sid else ""))
+        elif src.get("new_student") or item.new_student:
+            n = src.get("new_student") or item.new_student
+            form.update(mode="new", new={"name": n.get("name", ""), "grade": n.get("grade", "")},
+                        teacher=n.get("teacher", ""))
+        return form
 
     @staticmethod
     def _cand(c) -> dict:
@@ -104,6 +128,20 @@ class ReviewApp:
         clean = {k: v for k, v in decision.items() if k in _DECISION_KEYS}
         with self._lock:
             self.month.set_decision(key, clean)
+        return self.state()
+
+    def accept_all(self) -> dict:
+        """Accept every complete suggestion. Repeats while accepting reveals more (e.g. a duplicate)."""
+        with self._lock:
+            for _ in range(3):
+                cp, _ = self.month.previous()
+                decisions = self.month.decisions()
+                sug = rv.suggest(self.month.plan(), cp, decisions)
+                new = {k: v.decision for k, v in sug.items() if v.decision and decisions.get(k) != v.decision}
+                if not new:
+                    break
+                decisions.update(new)
+                rv.save_decisions(decisions, self.month.decisions_path)
         return self.state()
 
     def finish(self) -> dict:
@@ -196,6 +234,8 @@ def make_server(app: ReviewApp, port: int = 0) -> tuple[ThreadingHTTPServer, str
                 body = json.loads(self.rfile.read(length) or b"{}")
                 if url.path == "/api/decision":
                     return self._json(200, app.decide(body["key"], body.get("decision") or {}))
+                if url.path == "/api/accept_all":
+                    return self._json(200, app.accept_all())
                 if url.path == "/api/finish":
                     return self._json(200, app.finish())
             except (ck.CheckpointError, KeyError, ValueError) as e:

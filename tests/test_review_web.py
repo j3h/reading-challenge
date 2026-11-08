@@ -49,10 +49,16 @@ def test_state_lists_every_sheet_with_status_candidates_and_roster(month):
     st = web.ReviewApp(month).state()
     sheets = by_key(st)
     assert st["month"] == "October 2026" and st["ready"] is False
-    assert st["counts"] == {"open": 2, "done": 1, "skipped": 0}
-    assert sheets["scan.pdf#1"]["status"] == "done" and "Ada Example" in sheets["scan.pdf#1"]["outcome"]
+    assert st["counts"] == {"open": 2, "auto": 1, "decided": 0, "skipped": 0} and st["acceptable"] == 1
+    assert sheets["scan.pdf#1"]["status"] == "auto" and "Ada Example" in sheets["scan.pdf#1"]["outcome"]
     rozzie = sheets["scan.pdf#2"]
-    assert rozzie["status"] == "open" and {i["kind"] for i in rozzie["issues"]} == {"who", "pages", "month"}
+    assert rozzie["status"] == "open" and rozzie["can_accept"]
+    assert rozzie["warnings"] == ["sheet says 'September'; counted for October 2026"]
+    assert rozzie["form"] == {"mode": "student", "student": "S0002", "new": {"name": "Rozzie", "grade": ""},
+                              "teacher": "Tracy", "pages": 600, "remember_name": True, "duplicate": ""}
+    zed = sheets["scan.pdf#3"]["form"]
+    assert zed["mode"] == "new" and zed["new"]["name"] == "Zed Newcomer" and zed["teacher"] == ""
+    assert not sheets["scan.pdf#3"]["can_accept"]        # 'Moren' is not a teacher on the roster yet
     assert rozzie["candidates"][0]["name"] == "Rosalind Cox" and rozzie["candidates"][0]["reason"].startswith("nickname")
     assert st["teachers"] == ["Lopez", "Tracy"] and [p["name"] for p in st["roster"]] == ["Ada Example", "Rosalind Cox"]
     assert [s["key"] for s in st["sheets"]] == ["scan.pdf#1", "scan.pdf#2", "scan.pdf#3"]
@@ -60,9 +66,9 @@ def test_state_lists_every_sheet_with_status_candidates_and_roster(month):
 
 def test_deciding_saves_and_settles_and_finishing_writes_the_month(month):
     app = web.ReviewApp(month)
-    app.decide("scan.pdf#2", {"student": "S0002", "remember_name": True, "pages_ok": True, "month_ok": True})
+    app.decide("scan.pdf#2", {"student": "S0002", "remember_name": True, "pages": 600})
     st = app.decide("scan.pdf#3", {"new_student": {"name": "Zed Newcomer", "teacher": "Moren", "grade": "1"}})
-    assert st["ready"] is True and st["counts"] == {"open": 0, "done": 3, "skipped": 0}
+    assert st["ready"] is True and st["counts"] == {"open": 0, "auto": 1, "decided": 2, "skipped": 0}
     assert json.loads(month.decisions_path.read_text())["scan.pdf#2"]["student"] == "S0002"
     done = app.finish()
     assert done["finished"] is True and "Certificates: 3" in done["summary"]
@@ -86,7 +92,7 @@ def test_skipped_sheets_are_counted_and_do_not_block_finishing(month):
     app = web.ReviewApp(month)
     app.decide("scan.pdf#2", {"skip": "wrong month"})
     st = app.decide("scan.pdf#3", {"skip": "blank"})
-    assert st["counts"] == {"open": 0, "done": 1, "skipped": 2} and st["ready"] is True
+    assert st["counts"] == {"open": 0, "auto": 1, "decided": 0, "skipped": 2} and st["ready"] is True
 
 
 def test_finishing_with_nothing_settled_is_not_ready(month):
@@ -162,8 +168,27 @@ def test_handwritten_text_is_never_put_into_the_page_as_html():
     assert "innerHTML" not in html and "insertAdjacentHTML" not in html and "document.write" not in html
 
 
-def test_the_sheets_teacher_is_matched_to_a_roster_teacher(month):
-    rv.save_records([rv.SheetRecord("scan.pdf", 1, "Newcomer", "Ms. Tracy", "October", 5),
-                     rv.SheetRecord("scan.pdf", 2, "Other", "Someone Else", "October", 5)], month.records_path)
-    sheets = web.ReviewApp(month).state()["sheets"]
-    assert [s["teacher_guess"] for s in sheets] == ["Tracy", ""]
+def test_accept_all_takes_every_complete_suggestion_and_leaves_the_rest(month):
+    st = web.ReviewApp(month).accept_all()
+    sheets = by_key(st)
+    assert sheets["scan.pdf#2"]["status"] == "decided" and sheets["scan.pdf#3"]["status"] == "open"
+    assert json.loads(month.decisions_path.read_text()) == {
+        "scan.pdf#2": {"student": "S0002", "remember_name": True, "pages": 600}}
+    assert st["acceptable"] == 0 and st["ready"] is False
+
+
+def test_an_auto_settled_sheet_can_still_be_changed(month):
+    app = web.ReviewApp(month)
+    st = app.decide("scan.pdf#1", {"student": "S0001", "pages": 35, "teacher": "Tracy"})
+    assert by_key(st)["scan.pdf#1"]["status"] == "decided" and by_key(st)["scan.pdf#1"]["form"]["teacher"] == "Tracy"
+
+
+def test_a_student_with_no_teacher_gets_the_sheets_teacher_pre_filled(month):
+    cp = ck.load(month.folder.root / "2026-27" / "start" / "checkpoint.xlsx")
+    cp.students["S0002"] = ck.replace(cp.students["S0002"], teacher="")
+    ck.add_student(cp, "Other Kid", "Tracy")
+    ck.save(cp, month.folder.root / "2026-27" / "start" / "checkpoint.xlsx")
+    app = web.ReviewApp(month)
+    app.decide("scan.pdf#2", {"student": "S0002", "remember_name": True})      # chosen earlier, teacher not yet
+    form = by_key(app.state())["scan.pdf#2"]["form"]
+    assert form["student"] == "S0002" and form["teacher"] == "Tracy"

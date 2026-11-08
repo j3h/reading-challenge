@@ -7,75 +7,81 @@
 <style>
   :root {
     --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #deddd6;
-    --accent: #3b2fc9; --accent-ink: #ffffff; --open: #c2570c; --done: #19794a; --skip: #77777c;
-    --warn-bg: #fff4e5; --good-bg: #e8f5ee; --sel: #ecebff;
+    --accent: #3b2fc9; --accent-ink: #ffffff; --open: #c2570c; --auto: #19794a; --decided: #2f6fd6; --skip: #8a8a90;
+    --warn-bg: #fff4e5; --info-bg: #f0f0ec;
   }
   @media (prefers-color-scheme: dark) {
     :root { --bg: #17171a; --panel: #222226; --ink: #ededf0; --muted: #a0a0a8; --line: #38383e;
-            --accent: #8f87ff; --accent-ink: #12121a; --open: #f0a05a; --done: #5fcf94; --skip: #9a9aa2;
-            --warn-bg: #3a2c1c; --good-bg: #1d3328; --sel: #2d2b52; }
+            --accent: #8f87ff; --accent-ink: #12121a; --open: #f0a05a; --auto: #5fcf94; --decided: #7aa7ff; --skip: #8a8a92;
+            --warn-bg: #3a2c1c; --info-bg: #2b2b30; }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink);
-         font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-  header { display: flex; gap: 16px; align-items: center; padding: 12px 20px; background: var(--panel);
-           border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
-  header h1 { font-size: 17px; margin: 0; }
-  header .counts { color: var(--muted); flex: 1; }
+         font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   button, select, input { font: inherit; color: inherit; }
   button { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
-  button:hover { border-color: var(--accent); }
+  button:hover:not(:disabled) { border-color: var(--accent); }
   button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
   button:disabled { opacity: .45; cursor: not-allowed; }
-  input, select { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
-  main { display: grid; grid-template-columns: 240px minmax(300px, 1fr) minmax(340px, 480px); gap: 16px;
-         padding: 16px 20px; align-items: start; }
-  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
-  #list { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px;
-          max-height: calc(100vh - 100px); overflow: auto; position: sticky; top: 70px; }
-  #list label.filter { display: block; padding: 4px 8px 8px; color: var(--muted); font-size: 13px; }
-  .item { display: flex; gap: 8px; align-items: baseline; width: 100%; text-align: left; border: 0; border-radius: 8px;
-          padding: 7px 8px; background: transparent; }
-  .item.sel { background: var(--sel); }
-  .item .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--open); }
-  .item.done .dot { background: var(--done); } .item.skipped .dot { background: var(--skip); }
-  .item small { color: var(--muted); display: block; }
-  #scan { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px; position: sticky; top: 70px;
-          max-height: calc(100vh - 100px); overflow: auto; }
+  input, select { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; min-width: 0; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line); padding: 10px 16px; }
+  .top { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .top h1 { font-size: 16px; margin: 0; }
+  .top .counts { flex: 1; color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+  .chip { border-radius: 6px; padding: 2px 7px; font-size: 12px; border: 1px solid transparent; color: #fff; background: var(--open); }
+  .chip.auto { background: var(--auto); } .chip.decided { background: var(--decided); } .chip.skipped { background: var(--skip); }
+  .chip.sel { outline: 2px solid var(--ink); outline-offset: 1px; }
+  .legend { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin: 0 4px 0 10px; background: var(--c); }
+  main { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(330px, 1fr); gap: 14px; padding: 14px 16px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  #scan { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px; position: sticky; top: 112px;
+          max-height: calc(100vh - 128px); overflow: auto; }
   #scan img { width: 100%; display: block; border-radius: 6px; cursor: zoom-in; }
-  #scan.zoom img { width: 190%; max-width: none; cursor: zoom-out; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
-  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 8px; }
-  .read { display: grid; grid-template-columns: 90px 1fr; gap: 4px 10px; }
-  .read dt { color: var(--muted); } .read dd { margin: 0; }
-  .tag { font-size: 12px; border-radius: 99px; padding: 1px 8px; margin-left: 6px; background: var(--good-bg); color: var(--done); }
-  .tag.low, .tag.unreadable { background: var(--warn-bg); color: var(--open); }
-  .note { background: var(--warn-bg); border-radius: 8px; padding: 8px 10px; margin-top: 8px; }
-  .issue { background: var(--warn-bg); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
-  .ok { background: var(--good-bg); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
-  .choice { display: block; width: 100%; text-align: left; margin-bottom: 6px; }
-  .choice.sel { border-color: var(--accent); background: var(--sel); }
-  .choice small { color: var(--muted); }
-  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 6px 0; }
-  .row > input { flex: 1; min-width: 120px; }
-  .hint { color: var(--muted); font-size: 13px; }
-  pre.summary { white-space: pre-wrap; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  #scan.zoom img { width: 180%; max-width: none; cursor: zoom-out; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .nav { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .nav .where { flex: 1; font-weight: 600; }
+  .badge { font-size: 12px; border-radius: 99px; padding: 2px 9px; color: #fff; background: var(--open); }
+  .badge.auto { background: var(--auto); } .badge.decided { background: var(--decided); } .badge.skipped { background: var(--skip); }
+  .why { background: var(--warn-bg); border-radius: 8px; padding: 6px 10px; margin-bottom: 8px; }
+  .why ul { margin: 2px 0 0; padding-left: 18px; }
+  .info { background: var(--info-bg); border-radius: 8px; padding: 6px 10px; margin-bottom: 8px; color: var(--muted); }
+  .read { color: var(--muted); margin-bottom: 10px; }
+  .read b { color: var(--ink); font-weight: 600; }
+  .low { color: var(--open); font-weight: 600; }
+  .grid { display: grid; grid-template-columns: 74px 1fr; gap: 8px 10px; align-items: center; }
+  .grid label { color: var(--muted); }
+  .grid .full { display: flex; gap: 6px; flex-wrap: wrap; }
+  .grid .full > * { flex: 1; }
+  .actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; align-items: center; }
+  .actions .primary { padding: 8px 18px; }
+  .hint { color: var(--muted); font-size: 12px; }
+  kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+  pre.summary { white-space: pre-wrap; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
   #error { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #b3261e; color: #fff;
            padding: 10px 16px; border-radius: 10px; display: none; max-width: 80vw; z-index: 10; }
 </style>
 </head>
 <body>
 <header>
-  <h1 id="title">Reading Challenge review</h1>
-  <div class="counts" id="counts"></div>
-  <button id="finish" class="primary" disabled>Finish month</button>
+  <div class="top">
+    <h1 id="title">Reading Challenge review</h1>
+    <div class="counts" id="counts"></div>
+    <button id="acceptAll"></button>
+    <button id="finish" class="primary" disabled>Finish month</button>
+  </div>
+  <div class="chips" id="chips"></div>
+  <div class="legend"><span style="--c:var(--open)">needs a look</span><span style="--c:var(--auto)">automatic</span><span style="--c:var(--decided)">accepted</span><span style="--c:var(--skip)">skipped</span>
+    &nbsp; · &nbsp;<kbd>Enter</kbd> accept · <kbd>←</kbd><kbd>→</kbd> previous/next · <kbd>N</kbd> next that needs a look</div>
 </header>
 <div id="error"></div>
 <div id="app"></div>
 <script>
 "use strict";
 const TOKEN = "__TOKEN__";
-let state = null, selected = null, onlyOpen = false, zoom = false;
+let state = null, selected = null, zoom = false, form = null;
 const $ = (id) => document.getElementById(id);
 
 function el(tag, attrs, ...kids) {              // text only: nothing read from handwriting is ever parsed as HTML
@@ -83,8 +89,9 @@ function el(tag, attrs, ...kids) {              // text only: nothing read from 
   for (const [k, v] of Object.entries(attrs || {})) {
     if (k === "class") e.className = v;
     else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k === "value") e.value = v;
     else if (v === true) e.setAttribute(k, "");
-    else if (v !== false && v != null) e.setAttribute(k, v);
+    else if (v !== false && v != null && v !== "") e.setAttribute(k, v);
   }
   for (const kid of kids.flat()) if (kid != null && kid !== false) e.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
   return e;
@@ -97,174 +104,173 @@ async function api(path, body) {
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
 }
-async function load() { try { state = await api("/api/state"); render(); } catch (e) { fail(e.message); } }
-async function decide(key, decision) {
-  try { state = await api("/api/decision", { key, decision }); render(); } catch (e) { fail(e.message); }
-}
-const current = () => state.sheets.find((s) => s.key === selected);
-const set = (patch, drop = []) => {              // change this sheet's decision
-  const s = current(); const d = { ...s.decision, ...patch }; drop.forEach((k) => delete d[k]); return decide(s.key, d);
-};
-const fmt = (n) => (n == null ? "?" : Number(n).toLocaleString());
+const fmt = (n) => (n == null || n === "" ? "?" : Number(n).toLocaleString());
+const sheet = () => state.sheets.find((s) => s.key === selected);
+const idx = () => state.sheets.findIndex((s) => s.key === selected);
+const nextOpen = (from) => { const n = state.sheets.length;
+  for (let i = 1; i <= n; i++) { const s = state.sheets[(from + i) % n]; if (s.status === "open") return s; } return null; };
 
+async function load() { try { state = await api("/api/state"); pickDefault(); render(); } catch (e) { fail(e.message); } }
+function pickDefault() {
+  if (state.finished || state.sheets.some((s) => s.key === selected)) return;
+  selected = (state.sheets.find((s) => s.status === "open") || state.sheets[0] || {}).key || null;
+}
+function go(key) { selected = key; form = null; render(); window.scrollTo(0, 0); }
+
+async function save(decision, advance) {
+  const at = idx();
+  try { state = await api("/api/decision", { key: selected, decision }); }
+  catch (e) { return fail(e.message); }
+  form = null;
+  if (advance) { const n = nextOpen(at); if (n) selected = n.key; }
+  render();
+}
+
+// ---------------------------------------------------------------- page
 function render() {
   if (state.finished) return renderFinished();
-  $("title").textContent = "Review: " + state.month;
   const c = state.counts;
-  $("counts").textContent = `${state.sheets.length} sheets: ${c.open} need you, ${c.done} settled, ${c.skipped} skipped. From ${state.source}.`;
+  $("title").textContent = "Review: " + state.month;
+  $("counts").textContent = `${state.sheets.length} sheets · ${c.open} need a look · ${c.auto} automatic · ${c.decided} accepted · ${c.skipped} skipped`;
+  const ab = $("acceptAll");
+  ab.textContent = `Accept all suggestions (${state.acceptable})`; ab.disabled = !state.acceptable;
   $("finish").disabled = !state.ready;
-  if (!state.sheets.some((s) => s.key === selected)) {
-    const first = state.sheets.find((s) => s.status === "open") || state.sheets[0];
-    selected = first ? first.key : null;
-  }
-  const app = $("app"); app.replaceChildren(el("main", {}, renderList(), renderScan(), renderPanel()));
+  $("chips").replaceChildren(...state.sheets.map((s) =>
+    el("button", { class: `chip ${s.status} ${s.key === selected ? "sel" : ""}`, title: s.outcome || s.read.name, onclick: () => go(s.key) },
+      `${s.page} ${s.read.name || "?"}`)));
+  const s = sheet();
+  if (!s) return $("app").replaceChildren(el("main", {}, el("div", {}, "No sheets yet. Run extract first.")));
+  if (!form) form = JSON.parse(JSON.stringify(s.form));
+  $("app").replaceChildren(el("main", {},
+    el("div", { id: "scan", class: zoom ? "zoom" : "" },
+      el("img", { src: "/scan?key=" + encodeURIComponent(s.key) + "&t=" + TOKEN, alt: "Scanned sheet " + s.label, onclick: () => { zoom = !zoom; render(); } })),
+    renderPanel(s)));
 }
 
-function renderList() {
-  const box = el("div", { id: "list" },
-    el("label", { class: "filter" }, el("input", { type: "checkbox", checked: onlyOpen, onchange: (e) => { onlyOpen = e.target.checked; render(); } }), " only sheets that need me"));
-  for (const s of state.sheets) {
-    if (onlyOpen && s.status !== "open" && s.key !== selected) continue;
-    box.append(el("button", { class: `item ${s.status} ${s.key === selected ? "sel" : ""}`, onclick: () => { selected = s.key; render(); } },
-      el("span", { class: "dot" }), el("span", {}, `p. ${s.page}  ${s.read.name || "(no name)"}`, el("small", {}, s.outcome || s.read.teacher || ""))));
-  }
-  return box;
-}
-
-function renderScan() {
-  const s = current();
-  if (!s) return el("div");
-  return el("div", { id: "scan", class: zoom ? "zoom" : "" },
-    el("img", { src: "/scan?key=" + encodeURIComponent(s.key) + "&t=" + TOKEN, alt: "Scanned sheet " + s.label, onclick: () => { zoom = !zoom; render(); } }));
-}
-
-function renderPanel() {
-  const s = current();
-  if (!s) return el("div", {}, "No sheets yet. Run extract first.");
-  const r = s.read, kinds = new Set(s.issues.map((i) => i.kind));
-  const tag = (lvl) => el("span", { class: "tag " + lvl }, lvl);
-  const panel = el("div", {});
-  const next = state.sheets.find((x) => x.status === "open" && x.key !== s.key && state.sheets.indexOf(x) > state.sheets.indexOf(s)) || state.sheets.find((x) => x.status === "open" && x.key !== s.key);
-  panel.append(el("div", { class: "row" }, el("button", { disabled: !next, onclick: () => { selected = next.key; render(); window.scrollTo(0, 0); } }, "Next sheet that needs me →")));
-  panel.append(el("div", { class: "card" }, el("h2", {}, s.label),
-    el("dl", { class: "read" },
-      el("dt", {}, "Name"), el("dd", {}, r.name || "(none)", tag(r.confidence)),
-      el("dt", {}, "Teacher"), el("dd", {}, r.teacher || "(none)"),
-      el("dt", {}, "Month"), el("dd", {}, r.month || "(none)"),
-      el("dt", {}, "Pages"), el("dd", {}, fmt(r.pages), tag(r.pages_confidence))),
-    r.note ? el("div", { class: "note" }, r.note) : null));
-  if (s.status === "open") for (const i of s.issues) panel.append(el("div", { class: "issue" }, i.message));
-  else panel.append(el("div", { class: "ok" }, s.status === "skipped" ? "Skipped: " + s.outcome : "Settled: " + s.outcome));
-  panel.append(whoCard(s), pagesCard(s, kinds));
-  if (kinds.has("teacher") || s.decision.teacher) panel.append(teacherCard(s));
-  if (kinds.has("month") || s.decision.month_ok) panel.append(monthCard(s));
-  if (kinds.has("duplicate") || s.decision.duplicate) panel.append(duplicateCard(s));
+function renderPanel(s) {
+  const i = idx(), r = s.read;
+  const label = { open: "needs a look", auto: "automatic", decided: "accepted", skipped: "skipped" }[s.status];
+  const panel = el("div", { class: "panel" },
+    el("div", { class: "nav" },
+      el("button", { onclick: () => i > 0 && go(state.sheets[i - 1].key), disabled: i === 0, title: "Previous (←)" }, "←"),
+      el("span", { class: "where" }, `Sheet ${i + 1} of ${state.sheets.length}`, el("span", { class: "hint" }, `  ${s.label}`)),
+      el("span", { class: "badge " + s.status }, label),
+      el("button", { onclick: () => i < state.sheets.length - 1 && go(state.sheets[i + 1].key), disabled: i === state.sheets.length - 1, title: "Next (→)" }, "→")));
+  if (s.status === "open" && s.reasons.length)
+    panel.append(el("div", { class: "why" }, "Check:", el("ul", {}, s.reasons.map((x) => el("li", {}, x)))));
+  for (const w of s.warnings) panel.append(el("div", { class: "info" }, w));
+  if (s.status === "skipped") panel.append(el("div", { class: "info" }, s.outcome));
+  panel.append(el("div", { class: "read" }, "Read: ",
+    el("b", {}, r.name || "(no name)"), r.confidence !== "high" ? el("span", { class: "low" }, " (unsure)") : "", " · ",
+    el("b", {}, r.teacher || "(no teacher)"), " · ", r.month || "(no month)", " · ",
+    el("b", {}, fmt(r.pages) + " pages"), r.pages_confidence !== "high" ? el("span", { class: "low" }, " (unsure)") : "",
+    r.note ? el("div", { class: "hint" }, r.note) : null));
+  if (s.status !== "skipped") panel.append(renderForm(s));
+  else panel.append(el("div", { class: "actions" }, el("button", { class: "primary", onclick: () => save({}, false) }, "Un-skip")));
   return panel;
 }
 
-function whoCard(s) {
-  const d = s.decision, card = el("div", { class: "card" }, el("h2", {}, "Who is this?"));
-  const pick = (id) => set({ student: id, remember_name: rememberBox && rememberBox.checked }, ["new_student", "skip"]);
-  const remember = el("label", { class: "hint" });
-  var rememberBox = el("input", { type: "checkbox", checked: d.remember_name !== false && !!s.read.name,
-    onchange: () => d.student && pick(d.student) });
-  remember.append(rememberBox, ` remember "${s.read.name}" as another name for this child`);
-  const button = (c) => el("button", { class: "choice" + (d.student === c.id ? " sel" : ""), onclick: () => pick(c.id) },
-    `${c.name}`, el("small", {}, `  ${c.teacher || "no teacher"}${c.grade ? ", grade " + c.grade : ""} · ${fmt(c.total)} pages · ${c.reason}${c.from_hints ? " (last year)" : ""}`));
-  const fromList = s.candidates.filter((c) => !c.from_hints), hints = s.candidates.filter((c) => c.from_hints);
-  for (const c of fromList) card.append(button(c));
-  if (!fromList.length) card.append(el("div", { class: "hint" }, "No one on the roster looks like this."));
-  for (const c of hints) card.append(el("div", { class: "hint" }, `Last year: ${c.name} (${c.teacher}, grade ${c.grade || "?"}) - add as new below`));
-  // search the whole roster (nicknames, misspellings)
-  const results = el("div", {});
-  const search = el("input", { type: "search", placeholder: "Search the roster by any part of a name…", oninput: () => {
-    const q = search.value.trim().toLowerCase(); results.replaceChildren();
-    if (q.length < 2) return;
-    for (const p of state.roster.filter((p) => (p.name + " " + p.nicknames).toLowerCase().includes(q)).slice(0, 8))
-      results.append(button({ ...p, reason: "found by search", from_hints: false }));
+function renderForm(s) {
+  const f = form, cands = s.candidates.filter((c) => !c.from_hints);
+  // who
+  const who = el("select", { onchange: (e) => {
+    const v = e.target.value;
+    if (v === "__new") f.mode = "new";
+    else { f.mode = "student"; f.student = v; const p = state.roster.find((x) => x.id === v); f.teacher = p ? p.teacher : ""; }
+    render();
   } });
-  card.append(el("div", { class: "row" }, search), results);
-  if (s.read.name && d.student) card.append(remember);
-  card.append(newStudentForm(s), skipForm(s));
-  return card;
+  const options = [...cands];
+  if (f.mode === "student" && f.student && !options.some((c) => c.id === f.student)) {
+    const p = state.roster.find((x) => x.id === f.student); if (p) options.unshift({ ...p, reason: "chosen" });
+  }
+  for (const c of options) who.append(el("option", { value: c.id, selected: f.mode === "student" && f.student === c.id },
+    `${c.name} · ${c.teacher || "no teacher"}${c.grade ? " · gr " + c.grade : ""} · ${fmt(c.total)} pp`));
+  who.append(el("option", { value: "__new", selected: f.mode === "new" || (!f.mode) }, "New student…"));
+  const finder = el("input", { list: "rosterlist", placeholder: "Find someone else on the roster…" });
+  finder.addEventListener("change", () => {
+    const p = state.roster.find((x) => `${x.name} (${x.teacher || "no teacher"})` === finder.value);
+    if (p) { f.mode = "student"; f.student = p.id; f.teacher = p.teacher; render(); }
+  });
+  const datalist = el("datalist", { id: "rosterlist" }, state.roster.map((p) => el("option", { value: `${p.name} (${p.teacher || "no teacher"})` }, p.nicknames ? "also " + p.nicknames : "")));
+  // teacher
+  const teacher = el("select", { onchange: (e) => { f.teacher = e.target.value === "__other" ? "" : e.target.value; f.otherTeacher = e.target.value === "__other"; render(); } },
+    el("option", { value: "" }, "Choose a teacher…"),
+    state.teachers.map((t) => el("option", { value: t, selected: !f.otherTeacher && t === f.teacher }, t)),
+    el("option", { value: "__other", selected: f.otherTeacher || (f.teacher && !state.teachers.includes(f.teacher)) }, "Someone else…"));
+  const otherTeacher = (f.otherTeacher || (f.teacher && !state.teachers.includes(f.teacher)))
+    ? el("input", { value: f.teacher, placeholder: "Teacher's name", oninput: (e) => f.teacher = e.target.value }) : null;
+  const pages = el("input", { type: "number", min: 0, value: f.pages ?? "", oninput: (e) => f.pages = e.target.value === "" ? null : Number(e.target.value), style: "max-width:140px" });
+  const rows = [
+    el("label", {}, "Student"), el("div", { class: "full" }, who),
+    el("label", {}, ""), el("div", { class: "full" }, finder, datalist),
+  ];
+  if (f.mode !== "student") {
+    rows.push(el("label", {}, "Name"), el("div", { class: "full" },
+      el("input", { value: f.new.name, placeholder: "Full name", oninput: (e) => f.new.name = e.target.value }),
+      el("input", { value: f.new.grade, placeholder: "Grade", style: "max-width:80px;flex:none", oninput: (e) => f.new.grade = e.target.value })));
+    if (f.new.name && !f.new.name.trim().includes(" ")) rows.push(el("label", {}, ""), el("div", { class: "hint" }, "Only a first name: the certificate will print just this."));
+  }
+  rows.push(el("label", {}, "Teacher"), el("div", { class: "full" }, teacher, otherTeacher));
+  rows.push(el("label", {}, "Pages"), el("div", { class: "full" }, pages, el("span", { class: "hint", style: "align-self:center" }, `read ${fmt(s.read.pages)}`)));
+  if (f.mode === "student" && s.read.name) {
+    const p = state.roster.find((x) => x.id === f.student);
+    if (p && p.name.toLowerCase() !== s.read.name.trim().toLowerCase())
+      rows.push(el("label", {}, ""), el("label", { class: "hint" }, el("input", { type: "checkbox", checked: !!f.remember_name, onchange: (e) => f.remember_name = e.target.checked }), ` also recognise "${s.read.name}" as ${p.name} next time`));
+  }
+  if (s.duplicate) rows.push(el("label", {}, "2nd sheet"), el("div", { class: "full" },
+    el("select", { onchange: (e) => f.duplicate = e.target.value },
+      el("option", { value: "sum", selected: f.duplicate !== "skip" }, "add the pages to the other sheet"),
+      el("option", { value: "skip", selected: f.duplicate === "skip" }, "skip this one (same sheet twice)"))));
+  return el("div", {}, el("div", { class: "grid" }, rows),
+    el("div", { class: "actions" },
+      el("button", { class: "primary", id: "accept", onclick: accept }, s.status === "open" ? "Accept ⏎" : "Save changes ⏎"),
+      el("button", { onclick: () => { const why = prompt("Skip this sheet. Why? (e.g. blank, not a reading sheet)", "skipped"); if (why !== null) save({ skip: why || "skipped" }, true); } }, "Skip sheet"),
+      Object.keys(s.decision).length ? el("button", { onclick: () => save({}, false), title: "Forget what was chosen for this sheet" }, "Reset") : null));
 }
 
-function newStudentForm(s) {
-  const n = s.decision.new_student || {}, teachers = state.teachers;
-  const name = el("input", { value: n.name || s.read.name, placeholder: "Full name" });
-  const teacherSel = el("select", {}, el("option", { value: "" }, "Teacher…"),
-    teachers.map((t) => el("option", { value: t, selected: t === (n.teacher || s.teacher_guess) }, t)), el("option", { value: "__other" }, "Someone else…"));
-  const teacherTxt = el("input", { placeholder: "Teacher's name", style: "display:none" });
-  teacherSel.addEventListener("change", () => teacherTxt.style.display = teacherSel.value === "__other" ? "" : "none");
-  const grade = el("input", { value: n.grade || "", placeholder: "Grade", size: 4 });
-  const total = el("input", { value: n.total || "", placeholder: "pages before this month (if any)", type: "number", min: 0 });
-  const oneWord = el("div", { class: "hint", id: "oneword" }, "Only a first name: the certificate will print just this. Add the last name if you can find it.");
-  const syncOne = () => oneWord.style.display = name.value.trim().includes(" ") || !name.value.trim() ? "none" : "";
-  name.addEventListener("input", syncOne); syncOne();
-  const teacherGuess = s.read.teacher && !n.teacher ? el("div", { class: "hint" }, `The sheet says teacher: ${s.read.teacher}${s.teacher_guess ? ` (chosen: ${s.teacher_guess}; change it if wrong)` : ""}`) : null;
-  const save = () => {
-    const t = teacherSel.value === "__other" ? teacherTxt.value.trim() : teacherSel.value;
-    if (!name.value.trim()) return fail("Type the child's name first.");
-    set({ new_student: { name: name.value.trim(), teacher: t, grade: grade.value.trim(), total: Number(total.value || 0) } }, ["student", "remember_name", "skip"]);
-  };
-  return el("details", { open: !!s.decision.new_student, style: "margin-top:10px" }, el("summary", {}, "Add as a new student"),
-    el("div", { class: "row" }, name), oneWord, teacherGuess, el("div", { class: "row" }, teacherSel, teacherTxt, grade), el("div", { class: "row" }, total),
-    el("div", { class: "row" }, el("button", { class: "primary", onclick: save }, n.name ? "Update new student" : "Add new student"),
-      s.decision.new_student ? el("button", { onclick: () => set({}, ["new_student"]) }, "Remove") : null));
-}
-
-function skipForm(s) {
-  const why = el("input", { placeholder: "Why skip? (e.g. blank sheet)", value: typeof s.decision.skip === "string" ? s.decision.skip : "" });
-  return el("details", { open: !!s.decision.skip, style: "margin-top:10px" }, el("summary", {}, "Skip this sheet"),
-    el("div", { class: "row" }, why, el("button", { onclick: () => set({ skip: why.value.trim() || "skipped" }, ["student", "new_student", "remember_name"]) }, "Skip"),
-      s.decision.skip ? el("button", { onclick: () => set({}, ["skip"]) }, "Un-skip") : null));
-}
-
-function pagesCard(s, kinds) {
-  const r = s.read, d = s.decision;
-  const input = el("input", { type: "number", min: 0, value: d.pages != null ? d.pages : "", placeholder: "pages" });
-  const card = el("div", { class: "card" }, el("h2", {}, "Pages this month"),
-    el("div", {}, `Read: ${fmt(r.pages)}`, d.pages != null ? ` · using ${fmt(d.pages)}` : d.pages_ok ? " · confirmed" : ""));
-  const row = el("div", { class: "row" });
-  if (r.pages != null) row.append(el("button", { onclick: () => set({ pages_ok: true }, ["pages"]) }, `${fmt(r.pages)} is right`));
-  row.append(input, el("button", { onclick: () => input.value !== "" ? set({ pages: Number(input.value) }, ["pages_ok"]) : fail("Type the number of pages.") }, "Use this number"));
-  if (d.pages != null || d.pages_ok) row.append(el("button", { onclick: () => set({}, ["pages", "pages_ok"]) }, "Undo"));
-  card.append(row);
-  return card;
-}
-
-function teacherCard(s) {
-  const sel = el("select", {}, el("option", { value: "" }, "Teacher…"), state.teachers.map((t) => el("option", { value: t, selected: t === s.decision.teacher }, t)));
-  const other = el("input", { placeholder: "or type a teacher", value: state.teachers.includes(s.decision.teacher) ? "" : (s.decision.teacher || "") });
-  return el("div", { class: "card" }, el("h2", {}, "Teacher on file"), el("div", { class: "hint" }, "This child has no teacher yet. Look it up and enter it."),
-    el("div", { class: "row" }, sel, other, el("button", { class: "primary", onclick: () => { const t = other.value.trim() || sel.value; t ? set({ teacher: t }) : fail("Choose or type a teacher."); } }, "Save teacher")));
-}
-
-function monthCard(s) {
-  return el("div", { class: "card" }, el("h2", {}, "Month on the sheet"),
-    el("div", {}, `The sheet says "${s.read.month}" but this batch is ${state.month}.`),
-    el("div", { class: "row" }, s.decision.month_ok ? el("button", { onclick: () => set({}, ["month_ok"]) }, "Undo") :
-      el("button", { onclick: () => set({ month_ok: true }) }, `Count it for ${state.month}`),
-      el("button", { onclick: () => set({ skip: "wrong month" }, ["student", "new_student", "remember_name"]) }, "Skip: wrong month")));
-}
-
-function duplicateCard(s) {
-  const mk = (v, label) => el("button", { class: "choice" + (s.decision.duplicate === v ? " sel" : ""), onclick: () => set({ duplicate: v }) }, label);
-  return el("div", { class: "card" }, el("h2", {}, "Second sheet for this child"),
-    mk("sum", "Add the pages together"), mk("skip", "Skip this one (keep the first)"));
+function accept() {
+  const f = form, s = sheet();
+  if (f.pages == null || isNaN(f.pages) || f.pages < 0) return fail("Type the number of pages.");
+  if (!String(f.teacher || "").trim()) return fail("Choose a teacher.");
+  let d;
+  if (f.mode === "student") {
+    const p = state.roster.find((x) => x.id === f.student);
+    d = { student: f.student, remember_name: !!f.remember_name, pages: Number(f.pages) };
+    if (p && f.teacher.trim() !== p.teacher) d.teacher = f.teacher.trim();
+  } else {
+    if (!f.new.name.trim()) return fail("Type the child's name.");
+    d = { new_student: { name: f.new.name.trim(), teacher: f.teacher.trim(), grade: f.new.grade.trim() }, pages: Number(f.pages) };
+  }
+  if (s.duplicate) d.duplicate = f.duplicate || "sum";
+  save(d, true);
 }
 
 function renderFinished() {
-  $("title").textContent = "Finished: " + state.month; $("counts").textContent = ""; $("finish").style.display = "none";
+  $("title").textContent = "Finished: " + state.month; $("counts").textContent = "";
+  $("finish").style.display = $("acceptAll").style.display = "none"; $("chips").replaceChildren();
   $("app").replaceChildren(el("main", { style: "display:block;max-width:760px;margin:auto" },
-    el("div", { class: "ok" }, "Done. Files written:"),
+    el("div", { class: "info" }, "Done. Files written:"),
     el("ul", {}, Object.entries(state.files).map(([k, v]) => el("li", {}, `${k}: ${v}`))),
     el("pre", { class: "summary" }, state.summary)));
 }
 
+$("acceptAll").addEventListener("click", async () => {
+  if (!confirm(`Accept the suggestion for ${state.acceptable} sheet(s)? You can still change any of them afterwards.`)) return;
+  try { state = await api("/api/accept_all", {}); form = null; const n = state.sheets.find((s) => s.status === "open"); if (n) selected = n.key; render(); } catch (e) { fail(e.message); }
+});
 $("finish").addEventListener("click", async () => {
   if (!confirm("Finish " + state.month + "? This writes the certificates and the new checkpoint.")) return;
   try { state = await api("/api/finish", {}); render(); } catch (e) { fail(e.message); }
+});
+document.addEventListener("keydown", (e) => {
+  if (!state || state.finished || e.metaKey || e.ctrlKey || e.altKey) return;
+  const typing = ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName);
+  if (e.key === "Enter" && document.activeElement.tagName !== "BUTTON") { e.preventDefault(); if ($("accept")) accept(); return; }
+  if (typing) return;
+  const i = idx();
+  if (e.key === "ArrowRight" && i < state.sheets.length - 1) go(state.sheets[i + 1].key);
+  else if (e.key === "ArrowLeft" && i > 0) go(state.sheets[i - 1].key);
+  else if (e.key.toLowerCase() === "n") { const n = nextOpen(i); if (n) go(n.key); }
 });
 load();
 </script>
