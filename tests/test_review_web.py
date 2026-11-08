@@ -209,9 +209,6 @@ def test_snippets_of_the_scan_are_cut_where_each_value_was_read(month):
     assert rv.load_records(month.records_path)[0].boxes == {"name": [100, 100, 400, 140]}
 
 
-def test_the_table_is_the_default_and_the_card_view_is_still_there(server):
+def test_the_review_screen_is_the_table(server):
     base, token = server
     assert b"review (table)" in fetch(base + "/")[1]
-    assert b"review (table)" not in fetch(base + "/?view=cards")[1]
-    html = Path(web.PAGE_CARDS).read_text(encoding="utf-8")
-    assert "innerHTML" not in html and "insertAdjacentHTML" not in html and "document.write" not in html
