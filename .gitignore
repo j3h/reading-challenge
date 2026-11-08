@@ -16,3 +16,6 @@ __pycache__/
 .venv/
 .pytest_cache/
 .DS_Store
+
+# Holds only a 1Password reference (no secret), but keep it local anyway.
+.env

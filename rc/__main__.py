@@ -2,6 +2,7 @@
 
   start    create the month's folders and say where to put the scans
   check    list every open question about the scanned sheets (exit status 1 if any)
+  extract  read the scanned sheets with Claude (run as: op run --env-file=.env -- python -m rc ... extract)
   decide   answer a question from the command line (until the review page exists)
   finish   write certificates.pdf, summary.txt and checkpoint.xlsx for the month
   import-master  one-time: master spreadsheet PDF -> starting checkpoint for a season
@@ -13,6 +14,7 @@ import os
 import sys
 
 from rc import checkpoint as ck
+from rc import extract
 from rc import import_master
 from rc import runner
 from rc import workspace as wsp
@@ -58,6 +60,26 @@ def _is_new_student(m, args, current):
         return False
     match = m.plan().matches.get(args.sheet)         # a bare --teacher: for whoever the sheet matched
     return match is None or match.status != "exact"
+
+
+def cmd_extract(args):
+    m = _month(args)
+    if args.dry_run:
+        count, total, largest, done = extract.dry_run(m.folder, args.pages, args.dpi)
+        print(f"{count} page(s) would be read at {args.dpi} dpi; images total {total / 1e6:.1f} MB "
+              f"(largest {largest / 1e6:.2f} MB); {done} already read and kept. No API calls made.")
+        return
+    try:
+        client = extract.make_client()
+        records, dropped, usage = extract.extract_month(client, m.folder, args.model, args.dpi, args.pages,
+                                                        args.force, args.workers)
+    except extract.ExtractionError as e:
+        sys.exit(f"error: {e}")
+    print(f"\nRead {len(records)} sheet(s) -> {m.records_path}")
+    if dropped:
+        print(f"Not reading sheets (blank or other pages), left out: {', '.join(dropped)}")
+    print("Cost this run:", extract.cost_estimate(usage, args.model))
+    print('Next: python -m rc --data <folder> check --month "%s"' % ck.month_label(m.folder.month))
 
 
 def cmd_decide(args):
@@ -118,6 +140,15 @@ def main(argv=None):
         p = sub.add_parser(name)
         p.add_argument("--month", required=True, help='e.g. "October 2026"')
         p.set_defaults(fn=fn)
+    p = sub.add_parser("extract", help="read the scanned sheets with Claude (needs the API key: see rc/extract.py)")
+    p.add_argument("--month", required=True)
+    p.add_argument("--pages", help="only these scan pages, e.g. 1-10 (a trial slice)")
+    p.add_argument("--model", default=extract.DEFAULT_MODEL)
+    p.add_argument("--dpi", type=int, default=extract.DEFAULT_DPI)
+    p.add_argument("--workers", type=int, default=4)
+    p.add_argument("--force", action="store_true", help="ask again even for pages already read")
+    p.add_argument("--dry-run", action="store_true", help="render the pages and report sizes; no API calls")
+    p.set_defaults(fn=cmd_extract)
     p = sub.add_parser("decide")
     p.add_argument("--month", required=True)
     p.add_argument("sheet", help='sheet key as shown by check, e.g. "oct.pdf#12"')

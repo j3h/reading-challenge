@@ -97,7 +97,8 @@ def test_wrong_month_on_the_sheet_is_flagged(cp):
     records = [rec(1, "Ada Example", "Lopez", 30, month="September 2026"), rec(2, "Io Li", "Park", 5, month="")]
     assert kinds(rv.plan(records, cp, "October 2026", {})) == [("oct.pdf#1", "month")]
     assert rv.plan(records, cp, "October 2026", {"oct.pdf#1": {"month_ok": True}}).ready
-    assert rv.plan([rec(1, "Ada Example", "Lopez", 30, month="10/5/2026")], cp, "October 2026", {}).issues[0].kind == "month"
+    assert rv.plan([rec(1, "Ada Example", "Lopez", 30, month="9/19")], cp, "October 2026", {}).issues[0].kind == "month"
+    assert rv.plan([rec(1, "Ada Example", "Lopez", 30, month="October")], cp, "October 2026", {}).ready
 
 
 def test_skipping_a_sheet_settles_it_and_is_reported(cp):
@@ -182,3 +183,14 @@ def test_a_skipped_sheet_does_not_need_a_teacher_looked_up(cp):
     cp.students["S0002"] = ck.replace(cp.students["S0002"], teacher="")
     p = rv.plan([rec(1, "Sam Sample", "", 5)], cp, "October 2026", {"oct.pdf#1": {"skip": "blank"}})
     assert p.ready
+
+
+@pytest.mark.parametrize("written, ok", [
+    ("October", True), ("october", True), ("Oct", True), ("Oct.", True), ("OCT 2026", True), ("October 2026", True),
+    ("October, 2026", True), ("10/5", True), ("10/5/26", True), ("10/05/2026", True), ("10-5-2026", True),
+    ("2026-10", True),
+    ("September", False), ("9/19", False), ("Sept 2026", False), ("October 2025", False), ("10/5/25", False),
+    ("Octobre", False), ("", False), ("last month", False), ("Ma", False),
+])
+def test_what_a_child_writes_for_the_month_is_compared_by_month_and_year(written, ok):
+    assert rv.sheet_month_matches(written, "October 2026") is ok

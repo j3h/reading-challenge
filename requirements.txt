@@ -1,4 +1,5 @@
 pymupdf>=1.24
 fonttools>=4.50   # used by PyMuPDF to subset embedded fonts
 pytest>=8        # tests only
-openpyxl>=3.1   # only for tools/make_tracker_template.py
+openpyxl>=3.1   # checkpoint workbooks (rc/checkpoint.py)
+anthropic>=1.0   # reads scanned sheets (rc/extract.py)

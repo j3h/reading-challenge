@@ -22,6 +22,7 @@ Decisions, keyed by sheet ("<file>#<page>"):
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -108,6 +109,38 @@ def save_records(records: list[SheetRecord], path) -> None:
 
 
 # ------------------------------------------------------------------ planning
+MONTH_NAMES = {name.lower(): i for i, name in enumerate(
+    ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
+     "november", "december"], start=1)}
+
+
+def sheet_month_matches(written: str, batch: str) -> bool:
+    """Does what a child wrote for the month ('October', 'Oct.', '10/5', '9/19/26', 'October 2026') fit the batch?
+
+    Only the month, and the year when one is written, are compared. Anything unreadable does not match."""
+    want_year, want_month = (int(x) for x in ck.month_key(batch).split("-"))
+    text = " ".join(written.lower().replace(",", " ").replace(".", " ").split())
+    try:
+        got = ck.month_key(text)                              # '2026-10', 'october 2026'
+        return got == ck.month_key(batch)
+    except ck.CheckpointError:
+        pass
+    m = re.fullmatch(r"([a-z]+)(?: (\d{4}|\d{2}))?", text)
+    if m:
+        month = next((n for name, n in MONTH_NAMES.items() if name.startswith(m.group(1)) and len(m.group(1)) >= 3),
+                     None)
+        if month is None:
+            return False
+        year = m.group(2)
+        return month == want_month and (year is None or (2000 + int(year) if len(year) == 2 else int(year)) == want_year)
+    m = re.fullmatch(r"(\d{1,2})\s*[/\-]\s*(\d{1,2})(?:\s*[/\-]\s*(\d{4}|\d{2}))?", text)   # M/D or M/D/Y (US order)
+    if m:
+        year = m.group(3)
+        return int(m.group(1)) == want_month and (
+            year is None or (2000 + int(year) if len(year) == 2 else int(year)) == want_year)
+    return False
+
+
 def _identity(s: Settled, cp: ck.Checkpoint) -> str:
     if s.student_id:
         return s.student_id
@@ -183,14 +216,9 @@ def plan(records: list[SheetRecord], cp: ck.Checkpoint, batch_month: str, decisi
             issues.append(Issue(rec.key, "pages", f"{rec.label}: pages cannot be negative"))
 
         # the right month?
-        if rec.month:
-            try:
-                sheet_month = ck.month_key(rec.month)
-            except ck.CheckpointError:
-                sheet_month = None
-            if sheet_month != batch and not d.get("month_ok"):
-                issues.append(Issue(rec.key, "month", f"{rec.label}: sheet says {rec.month!r}, batch is "
-                                                      f"{ck.month_label(batch)}"))
+        if rec.month and not d.get("month_ok") and not sheet_month_matches(rec.month, batch):
+            issues.append(Issue(rec.key, "month", f"{rec.label}: sheet says {rec.month!r}, batch is "
+                                                  f"{ck.month_label(batch)}"))
         settled.append(item)
 
     # two sheets for the same child
