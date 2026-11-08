@@ -65,10 +65,8 @@
   .box ul { margin: 2px 0 0; padding-left: 18px; }
   .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
   .hint { color: var(--muted); font-size: 12px; }
-  #sheet { position: fixed; top: 60px; right: 16px; bottom: 16px; width: min(46vw, 640px); background: var(--panel); border: 1px solid var(--line);
-           border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,.2); overflow: auto; display: none; z-index: 8; padding: 8px; }
-  #sheet img { width: 100%; display: block; }
-  #sheet button { position: sticky; top: 0; float: right; }
+  tr.sheet td { background: var(--sel); padding: 0 10px 14px; }
+  tr.sheet img { display: block; width: 100%; max-width: 900px; margin: 0 auto; border: 1px solid var(--line); border-radius: 8px; }
   pre.summary { white-space: pre-wrap; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
   #error { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #b3261e; color: #fff;
            padding: 10px 16px; border-radius: 10px; display: none; max-width: 80vw; z-index: 10; }
@@ -86,7 +84,6 @@
   <span><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> accept row &amp; go to next that needs a look · <kbd>Esc</kbd> close row</span>
 </div>
 <div class="wrap" id="app"></div>
-<div id="sheet"></div>
 <div id="error"></div>
 <script>
 "use strict";
@@ -154,11 +151,14 @@ function render() {
   $("acceptAll").textContent = `Accept all suggestions (${state.acceptable})`; $("acceptAll").disabled = !state.acceptable;
   $("finish").disabled = !state.ready;
   const body = el("tbody");
-  for (const s of visible()) body.append(s.key === selected ? openRow(s) : closedRow(s));
+  for (const s of visible()) {
+    body.append(s.key === selected ? openRow(s) : closedRow(s));
+    if (s.key === selected && showSheet) body.append(el("tr", { class: "sheet" }, el("td", { colspan: 7 },
+      el("img", { src: "/scan?key=" + encodeURIComponent(s.key) + "&t=" + TOKEN, alt: "Scanned sheet " + s.label }))));
+  }
   $("app").replaceChildren(el("table", {},
     el("colgroup", {}, ["c-st", "c-pg", "c-name", "c-stu", "c-tea", "c-pp", "c-chk"].map((c) => el("col", { class: c }))),
     el("thead", {}, el("tr", {}, ["Status", "Page", "Name on sheet", "Student", "Teacher", "Pages", "Check"].map((h) => el("th", {}, h)))), body));
-  renderSheet();
 }
 
 function closedRow(s) {
@@ -187,7 +187,7 @@ function openRow(s) {
   if (!form) form = JSON.parse(JSON.stringify(s.form));
   const f = form;
   const statusCell = el("td", {}, el("div", { class: "stack" }, el("span", { class: "st " + s.status }, label[s.status]),
-    el("button", { onclick: (e) => { stop(e); showSheet = !showSheet; renderSheet(); }, title: s.label }, showSheet ? "Hide sheet" : "Whole sheet")));
+    el("button", { onclick: (e) => { stop(e); showSheet = !showSheet; render(); }, title: s.label }, showSheet ? "Hide sheet" : "Whole sheet")));
   const nameCell = el("td", {}, el("div", { class: "stack" },
     el("span", {}, r.name || "(no name)", r.confidence !== "high" ? el("span", { class: "unsure" }, " ?") : ""), snip(s, "name"),
     r.note ? el("span", { class: "hint" }, r.note) : null));
@@ -256,13 +256,6 @@ function openRow(s) {
     editable(studentStack), editable(teacherStack), el("td", { class: "num", onclick: stop }, pagesStack), editable(checkCell.firstChild));
 }
 
-function renderSheet() {
-  const s = sheet(), box = $("sheet");
-  if (!showSheet || !s) { box.style.display = "none"; return; }
-  box.style.display = "block";
-  box.replaceChildren(el("button", { onclick: () => { showSheet = false; renderSheet(); } }, "Close ✕"),
-    el("img", { src: "/scan?key=" + encodeURIComponent(s.key) + "&t=" + TOKEN, alt: "Scanned sheet " + s.label }));
-}
 
 function accept() {
   const f = form, s = sheet();
