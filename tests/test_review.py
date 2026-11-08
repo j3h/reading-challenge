@@ -274,3 +274,8 @@ def test_suggestion_uses_last_years_name_and_grade(cp):
     ck.add_student(last_year, "Quentin Quimby", "Old Teacher", "1")
     s = sug([rec(1, "Quentin", "Park", 5)], cp, hints=last_year)["oct.pdf#1"]
     assert s.decision["new_student"] == {"name": "Quentin Quimby", "teacher": "Park", "grade": "1"}
+
+
+def test_a_confident_match_on_a_hard_to_read_name_says_so(cp):
+    s = sug([rec(1, "Ada Example", "Lopez", 30, confidence=rv.LOW)], cp)["oct.pdf#1"]
+    assert s.decision["student"] == "S0001" and s.reasons[0].startswith("name hard to read")

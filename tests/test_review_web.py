@@ -207,3 +207,11 @@ def test_snippets_of_the_scan_are_cut_where_each_value_was_read(month):
     with pytest.raises(KeyError):
         app.scan_crop("scan.pdf#1", "total")
     assert rv.load_records(month.records_path)[0].boxes == {"name": [100, 100, 400, 140]}
+
+
+def test_the_table_view_is_served_beside_the_card_view(server):
+    base, token = server
+    assert b"review (table)" in fetch(base + "/?view=table")[1]
+    assert b"review (table)" not in fetch(base + "/")[1]
+    html = Path(web.PAGE_TABLE).read_text(encoding="utf-8")
+    assert "innerHTML" not in html and "insertAdjacentHTML" not in html and "document.write" not in html

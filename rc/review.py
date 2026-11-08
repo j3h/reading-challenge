@@ -334,7 +334,8 @@ def suggest(p: Plan, cp: ck.Checkpoint, decisions: dict) -> dict[str, Suggestion
             d["student"] = best.student.id
             d["remember_name"] = not best.reason.startswith(("same name", "same words"))
             others = [c for c in m.candidates[1:] if not c.from_hints and c.score >= best.score - 0.1]
-            reasons.append(f"{best.reason}" + (f"; could also be {others[0].student.name}" if others else ""))
+            why = "name hard to read" if m.status == mt.EXACT else best.reason
+            reasons.append(why + (f"; could also be {others[0].student.name}" if others else ""))
         else:
             hint = m.candidates[0].student if m and m.candidates else None
             d["new_student"] = {"name": hint.name if hint else rec.name, "teacher": guess,

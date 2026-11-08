@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reading Challenge review (table)</title>
+<style>
+  /* Experimental table view. To roll back: delete this file (the card view at / is unchanged). */
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #e4e3dc; --row: #fbfaf7;
+    --accent: #3b2fc9; --accent-ink: #ffffff; --open: #c2570c; --auto: #19794a; --decided: #2f6fd6; --skip: #8a8a90;
+    --warn-bg: #fff4e5; --info-bg: #f0f0ec; --sel: #efeeff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #17171a; --panel: #222226; --ink: #ededf0; --muted: #a0a0a8; --line: #34343a; --row: #26262b;
+            --accent: #8f87ff; --accent-ink: #12121a; --open: #f0a05a; --auto: #5fcf94; --decided: #7aa7ff; --skip: #8a8a92;
+            --warn-bg: #3a2c1c; --info-bg: #2b2b30; --sel: #2d2b52; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  button, select, input { font: inherit; color: inherit; }
+  button { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 5px 11px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  input, select { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; min-width: 0; }
+  a { color: var(--accent); }
+  header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line);
+           padding: 10px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; }
+  header .counts { flex: 1; color: var(--muted); }
+  .bar { display: flex; gap: 14px; align-items: center; padding: 8px 16px; color: var(--muted); font-size: 13px; flex-wrap: wrap; }
+  kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+  .wrap { padding: 0 16px 40px; }
+  table { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  th { text-align: left; font-weight: 600; font-size: 12px; color: var(--muted); padding: 7px 10px; border-bottom: 1px solid var(--line); background: var(--row); }
+  td { padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr.row { cursor: pointer; }
+  tr.row:hover td { background: var(--row); }
+  tr.row.sel td { background: var(--sel); }
+  tr.row.sel td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .st { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12px; }
+  .st::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--c); }
+  .st.open { --c: var(--open); color: var(--open); font-weight: 600; } .st.auto { --c: var(--auto); }
+  .st.decided { --c: var(--decided); } .st.skipped { --c: var(--skip); color: var(--muted); }
+  .muted { color: var(--muted); }
+  .unsure { color: var(--open); font-weight: 600; }
+  .why { font-size: 12px; color: var(--open); }
+  tr.edit td { background: var(--sel); padding: 0 10px 14px; }
+  .editor { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.1fr); gap: 16px; padding-top: 4px; }
+  @media (max-width: 900px) { .editor { grid-template-columns: 1fr; } }
+  .snips { display: grid; grid-template-columns: 64px 1fr; gap: 6px 8px; align-items: center; }
+  .snips img { max-width: 100%; max-height: 70px; border: 1px solid var(--line); border-radius: 6px; background: #fff; cursor: zoom-in; }
+  .snips img.big { max-height: 220px; cursor: zoom-out; }
+  .grid { display: grid; grid-template-columns: 70px 1fr; gap: 7px 10px; align-items: center; }
+  .grid label { color: var(--muted); font-size: 13px; }
+  .grid .full { display: flex; gap: 6px; flex-wrap: wrap; }
+  .grid .full > * { flex: 1; }
+  .box { border-radius: 8px; padding: 6px 10px; margin-bottom: 8px; font-size: 13px; }
+  .box.why { background: var(--warn-bg); color: var(--ink); }
+  .box.info { background: var(--info-bg); color: var(--muted); }
+  .box ul { margin: 2px 0 0; padding-left: 18px; }
+  .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .hint { color: var(--muted); font-size: 12px; }
+  #sheet { position: fixed; top: 60px; right: 16px; bottom: 16px; width: min(46vw, 640px); background: var(--panel); border: 1px solid var(--line);
+           border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,.2); overflow: auto; display: none; z-index: 8; padding: 8px; }
+  #sheet img { width: 100%; display: block; }
+  #sheet button { position: sticky; top: 0; float: right; }
+  pre.summary { white-space: pre-wrap; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  #error { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #b3261e; color: #fff;
+           padding: 10px 16px; border-radius: 10px; display: none; max-width: 80vw; z-index: 10; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Reading Challenge review</h1>
+  <div class="counts" id="counts"></div>
+  <a href="/" class="hint">Card view</a>
+  <button id="acceptAll"></button>
+  <button id="finish" class="primary" disabled>Finish month</button>
+</header>
+<div class="bar">
+  <label><input type="checkbox" id="onlyOpen"> only rows that need a look</label>
+  <span><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> accept row &amp; go to next that needs a look · <kbd>Esc</kbd> close row</span>
+</div>
+<div class="wrap" id="app"></div>
+<div id="sheet"></div>
+<div id="error"></div>
+<script>
+"use strict";
+const TOKEN = "__TOKEN__";
+let state = null, selected = null, form = null, onlyOpen = false, showSheet = false;
+const $ = (id) => document.getElementById(id);
+
+function el(tag, attrs, ...kids) {              // text only: nothing read from handwriting is ever parsed as HTML
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k === "value") e.value = v;
+    else if (v === true) e.setAttribute(k, "");
+    else if (v !== false && v != null && v !== "") e.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) e.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  return e;
+}
+function fail(msg) { const e = $("error"); e.textContent = msg; e.style.display = "block"; setTimeout(() => e.style.display = "none", 6000); }
+async function api(path, body) {
+  const res = await fetch(path + (path.includes("?") ? "&" : "?") + "t=" + TOKEN, body === undefined ? {} :
+    { method: "POST", headers: { "X-Token": TOKEN, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+const fmt = (n) => (n == null || n === "" ? "?" : Number(n).toLocaleString());
+const sheet = () => state.sheets.find((s) => s.key === selected);
+const visible = () => state.sheets.filter((s) => !onlyOpen || s.status === "open" || s.key === selected);
+const label = { open: "needs a look", auto: "automatic", decided: "accepted", skipped: "skipped" };
+const nextOpen = (fromKey) => { const list = state.sheets, n = list.length, at = list.findIndex((s) => s.key === fromKey);
+  for (let i = 1; i <= n; i++) { const s = list[(at + i) % n]; if (s.status === "open") return s; } return null; };
+
+async function load() {
+  try { state = await api("/api/state"); } catch (e) { return fail(e.message); }
+  if (!state.finished && !state.sheets.some((s) => s.key === selected)) selected = (state.sheets.find((s) => s.status === "open") || {}).key || null;
+  render();
+}
+function open(key) { selected = selected === key ? null : key; form = null; render(); scrollToSel(); }
+function scrollToSel() { const r = document.querySelector("tr.row.sel"); if (r) r.scrollIntoView({ block: "nearest" }); }
+
+async function save(decision, advance) {
+  const from = selected;
+  try { state = await api("/api/decision", { key: from, decision }); } catch (e) { return fail(e.message); }
+  form = null;
+  if (advance) { const n = nextOpen(from); selected = n ? n.key : null; }
+  render(); scrollToSel();
+}
+
+// ---------------------------------------------------------------- what each row says, closed
+function studentCell(s) {
+  const f = s.form;
+  if (s.status === "skipped") return el("span", { class: "muted" }, s.outcome);
+  if (f.mode === "student") { const p = state.roster.find((x) => x.id === f.student); return p ? p.name : "?"; }
+  if (f.mode === "new") return el("span", {}, f.new.name || "?", el("span", { class: "muted" }, " (new)"));
+  return el("span", { class: "muted" }, "?");
+}
+
+function render() {
+  if (state.finished) return renderFinished();
+  const c = state.counts;
+  $("title").textContent = "Review: " + state.month;
+  $("counts").textContent = `${state.sheets.length} sheets · ${c.open} need a look · ${c.auto} automatic · ${c.decided} accepted · ${c.skipped} skipped`;
+  $("acceptAll").textContent = `Accept all suggestions (${state.acceptable})`; $("acceptAll").disabled = !state.acceptable;
+  $("finish").disabled = !state.ready;
+  const body = el("tbody");
+  for (const s of visible()) {
+    const r = s.read, sel = s.key === selected;
+    body.append(el("tr", { class: "row" + (sel ? " sel" : ""), onclick: () => open(s.key) },
+      el("td", {}, el("span", { class: "st " + s.status }, label[s.status])),
+      el("td", { class: "muted" }, s.page),
+      el("td", {}, r.name || "(no name)", r.confidence !== "high" ? el("span", { class: "unsure" }, " ?") : ""),
+      el("td", {}, studentCell(s)),
+      el("td", {}, s.status === "skipped" ? "" : (s.form.teacher || el("span", { class: "why" }, "choose"))),
+      el("td", { class: "num" }, s.status === "skipped" ? "" : fmt(s.form.pages), r.pages_confidence !== "high" && s.status !== "skipped" ? el("span", { class: "unsure" }, " ?") : ""),
+      el("td", {}, s.status === "open" ? el("span", { class: "why" }, s.reasons.join(" · ")) : el("span", { class: "muted" }, s.warnings[0] || ""))));
+    if (sel) body.append(el("tr", { class: "edit" }, el("td", { colspan: 7 }, editor(s))));
+  }
+  $("app").replaceChildren(el("table", {},
+    el("thead", {}, el("tr", {}, ["Status", "Page", "Name on sheet", "Student", "Teacher", "Pages", "Check"].map((h) => el("th", {}, h)))), body));
+  renderSheet();
+}
+
+function renderSheet() {
+  const s = sheet(), box = $("sheet");
+  if (!showSheet || !s) { box.style.display = "none"; return; }
+  box.style.display = "block";
+  box.replaceChildren(el("button", { onclick: () => { showSheet = false; renderSheet(); } }, "Close ✕"),
+    el("img", { src: "/scan?key=" + encodeURIComponent(s.key) + "&t=" + TOKEN, alt: "Scanned sheet " + s.label }));
+}
+
+// ---------------------------------------------------------------- the open row
+function snip(s, field, title) {
+  if (!s.read.boxes.includes(field)) return [];
+  const img = el("img", { alt: "", title: "Click to enlarge", src: `/crop?key=${encodeURIComponent(s.key)}&field=${field}&t=${TOKEN}`,
+    onclick: (e) => { e.stopPropagation(); e.target.classList.toggle("big"); } });
+  img.addEventListener("error", () => img.remove());
+  return [el("span", { class: "hint" }, title), img];
+}
+
+function editor(s) {
+  const r = s.read;
+  const left = el("div", {},
+    el("div", { class: "snips" }, ...snip(s, "name", "Name"), ...snip(s, "teacher", "Teacher"), ...snip(s, "total", "Total"), ...snip(s, "month", "Month")),
+    el("div", { class: "hint", style: "margin-top:6px" }, `Read: ${r.name || "(no name)"} · ${r.teacher || "(no teacher)"} · ${r.month || "(no month)"} · ${fmt(r.pages)} pages`),
+    r.note ? el("div", { class: "hint" }, r.note) : null,
+    el("div", { class: "actions" }, el("button", { onclick: (e) => { e.stopPropagation(); showSheet = !showSheet; renderSheet(); } }, showSheet ? "Hide whole sheet" : "Show whole sheet"),
+      el("span", { class: "hint", style: "align-self:center" }, s.label)));
+  const right = el("div", {});
+  if (s.status === "open" && s.reasons.length) right.append(el("div", { class: "box why" }, el("ul", {}, s.reasons.map((x) => el("li", {}, x)))));
+  for (const w of s.warnings) right.append(el("div", { class: "box info" }, w));
+  if (s.status === "skipped") right.append(el("div", { class: "box info" }, s.outcome), el("div", { class: "actions" }, el("button", { class: "primary", onclick: () => save({}, false) }, "Un-skip")));
+  else right.append(formFor(s));
+  return el("div", { class: "editor", onclick: (e) => e.stopPropagation() }, left, right);
+}
+
+function formFor(s) {
+  if (!form) form = JSON.parse(JSON.stringify(s.form));
+  const f = form, cands = s.candidates.filter((c) => !c.from_hints);
+  const who = el("select", { id: "who", onchange: (e) => {
+    const v = e.target.value;
+    if (v === "__new") f.mode = "new";
+    else { f.mode = "student"; f.student = v; const p = state.roster.find((x) => x.id === v); f.teacher = p ? p.teacher : ""; }
+    render();
+  } });
+  const options = [...cands];
+  if (f.mode === "student" && f.student && !options.some((c) => c.id === f.student)) {
+    const p = state.roster.find((x) => x.id === f.student); if (p) options.unshift({ ...p, reason: "chosen" });
+  }
+  for (const c of options) who.append(el("option", { value: c.id, selected: f.mode === "student" && f.student === c.id },
+    `${c.name} · ${c.teacher || "no teacher"}${c.grade ? " · gr " + c.grade : ""} · ${fmt(c.total)} pp`));
+  who.append(el("option", { value: "__new", selected: f.mode !== "student" }, "New student…"));
+  const finder = el("input", { list: "rosterlist", placeholder: "Find someone else on the roster…" });
+  finder.addEventListener("change", () => {
+    const p = state.roster.find((x) => `${x.name} (${x.teacher || "no teacher"})` === finder.value);
+    if (p) { f.mode = "student"; f.student = p.id; f.teacher = p.teacher; render(); }
+  });
+  const datalist = el("datalist", { id: "rosterlist" }, state.roster.map((p) => el("option", { value: `${p.name} (${p.teacher || "no teacher"})` })));
+  const isOther = f.otherTeacher || (f.teacher && !state.teachers.includes(f.teacher));
+  const teacher = el("select", { onchange: (e) => { f.otherTeacher = e.target.value === "__other"; f.teacher = f.otherTeacher ? "" : e.target.value; render(); } },
+    el("option", { value: "" }, "Choose a teacher…"),
+    state.teachers.map((t) => el("option", { value: t, selected: !isOther && t === f.teacher }, t)),
+    el("option", { value: "__other", selected: isOther }, "Someone else…"));
+  const other = isOther ? el("input", { value: f.teacher, placeholder: "Teacher's name", oninput: (e) => f.teacher = e.target.value }) : null;
+  const rows = [el("label", {}, "Student"), el("div", { class: "full" }, who), el("label", {}, ""), el("div", { class: "full" }, finder, datalist)];
+  if (f.mode !== "student") {
+    rows.push(el("label", {}, "Name"), el("div", { class: "full" },
+      el("input", { value: f.new.name, placeholder: "Full name", oninput: (e) => f.new.name = e.target.value }),
+      el("input", { value: f.new.grade, placeholder: "Grade", style: "max-width:80px;flex:none", oninput: (e) => f.new.grade = e.target.value })));
+    if (f.new.name && !f.new.name.trim().includes(" ")) rows.push(el("label", {}, ""), el("div", { class: "hint" }, "Only a first name: the certificate will print just this."));
+  }
+  rows.push(el("label", {}, "Teacher"), el("div", { class: "full" }, teacher, other));
+  rows.push(el("label", {}, "Pages"), el("div", { class: "full" },
+    el("input", { type: "number", min: 0, value: f.pages ?? "", style: "max-width:140px", oninput: (e) => f.pages = e.target.value === "" ? null : Number(e.target.value) })));
+  if (f.mode === "student" && s.read.name) {
+    const p = state.roster.find((x) => x.id === f.student);
+    if (p && p.name.toLowerCase() !== s.read.name.trim().toLowerCase())
+      rows.push(el("label", {}, ""), el("label", { class: "hint" }, el("input", { type: "checkbox", checked: !!f.remember_name, onchange: (e) => f.remember_name = e.target.checked }), ` also recognise "${s.read.name}" as ${p.name} next time`));
+  }
+  if (s.duplicate) rows.push(el("label", {}, "2nd sheet"), el("div", { class: "full" },
+    el("select", { onchange: (e) => f.duplicate = e.target.value },
+      el("option", { value: "sum", selected: f.duplicate !== "skip" }, "add the pages to the other sheet"),
+      el("option", { value: "skip", selected: f.duplicate === "skip" }, "skip this one (same sheet twice)"))));
+  return el("div", {}, el("div", { class: "grid" }, rows),
+    el("div", { class: "actions" },
+      el("button", { class: "primary", id: "accept", onclick: accept }, s.status === "open" ? "Accept ⏎" : "Save ⏎"),
+      el("button", { onclick: () => { const why = prompt("Skip this sheet. Why?", "skipped"); if (why !== null) save({ skip: why || "skipped" }, true); } }, "Skip sheet"),
+      Object.keys(s.decision).length ? el("button", { onclick: () => save({}, false) }, "Reset") : null));
+}
+
+function accept() {
+  const f = form, s = sheet();
+  if (!f || !s) return;
+  if (f.pages == null || isNaN(f.pages) || f.pages < 0) return fail("Type the number of pages.");
+  if (!String(f.teacher || "").trim()) return fail("Choose a teacher.");
+  let d;
+  if (f.mode === "student") {
+    const p = state.roster.find((x) => x.id === f.student);
+    d = { student: f.student, remember_name: !!f.remember_name, pages: Number(f.pages) };
+    if (p && f.teacher.trim() !== p.teacher) d.teacher = f.teacher.trim();
+  } else {
+    if (!f.new.name.trim()) return fail("Type the child's name.");
+    d = { new_student: { name: f.new.name.trim(), teacher: f.teacher.trim(), grade: f.new.grade.trim() }, pages: Number(f.pages) };
+  }
+  if (s.duplicate) d.duplicate = f.duplicate || "sum";
+  save(d, true);
+}
+
+function renderFinished() {
+  $("title").textContent = "Finished: " + state.month; $("counts").textContent = "";
+  $("finish").style.display = $("acceptAll").style.display = "none";
+  $("app").replaceChildren(el("div", { class: "box info" }, "Done. Files written:"),
+    el("ul", {}, Object.entries(state.files).map(([k, v]) => el("li", {}, `${k}: ${v}`))), el("pre", { class: "summary" }, state.summary));
+}
+
+$("onlyOpen").addEventListener("change", (e) => { onlyOpen = e.target.checked; render(); });
+$("acceptAll").addEventListener("click", async () => {
+  if (!confirm(`Accept the suggestion for ${state.acceptable} sheet(s)? You can still change any of them afterwards.`)) return;
+  try { state = await api("/api/accept_all", {}); form = null; selected = (state.sheets.find((s) => s.status === "open") || {}).key || null; render(); } catch (e) { fail(e.message); }
+});
+$("finish").addEventListener("click", async () => {
+  if (!confirm("Finish " + state.month + "? This writes the certificates and the new checkpoint.")) return;
+  try { state = await api("/api/finish", {}); render(); } catch (e) { fail(e.message); }
+});
+document.addEventListener("keydown", (e) => {
+  if (!state || state.finished || e.metaKey || e.ctrlKey || e.altKey) return;
+  const tag = document.activeElement.tagName;
+  if (e.key === "Enter" && tag !== "BUTTON" && selected && $("accept")) { e.preventDefault(); accept(); return; }
+  if (e.key === "Escape") { selected = null; form = null; showSheet = false; render(); return; }
+  if (["INPUT", "SELECT", "TEXTAREA"].includes(tag)) return;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const list = visible(), at = list.findIndex((s) => s.key === selected);
+    const to = e.key === "ArrowDown" ? Math.min(list.length - 1, at + 1) : Math.max(0, at - 1);
+    if (list[to]) { selected = list[to].key; form = null; render(); scrollToSel(); }
+  }
+});
+load();
+</script>
+</body>
+</html>
