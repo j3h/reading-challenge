@@ -58,6 +58,9 @@
   .actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; align-items: center; }
   .actions .primary { padding: 8px 18px; }
   .hint { color: var(--muted); font-size: 12px; }
+  .snip { grid-column: 2; display: block; max-width: 100%; max-height: 64px; border: 1px solid var(--line); border-radius: 6px;
+          background: #fff; cursor: zoom-in; }
+  .snip.big { max-height: 200px; cursor: zoom-out; }
   kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
   pre.summary { white-space: pre-wrap; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
   #error { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #b3261e; color: #fff;
@@ -170,6 +173,14 @@ function renderPanel(s) {
   return panel;
 }
 
+function snip(s, field) {     // the handwriting this value was read from, right beside it
+  if (!s.read.boxes.includes(field)) return [];
+  const img = el("img", { class: "snip", alt: "", title: "What the sheet says (click to enlarge)",
+    src: `/crop?key=${encodeURIComponent(s.key)}&field=${field}&t=${TOKEN}`, onclick: (e) => e.target.classList.toggle("big") });
+  img.addEventListener("error", () => img.remove());
+  return [el("span", {}), img];
+}
+
 function renderForm(s) {
   const f = form, cands = s.candidates.filter((c) => !c.from_hints);
   // who
@@ -201,6 +212,7 @@ function renderForm(s) {
     ? el("input", { value: f.teacher, placeholder: "Teacher's name", oninput: (e) => f.teacher = e.target.value }) : null;
   const pages = el("input", { type: "number", min: 0, value: f.pages ?? "", oninput: (e) => f.pages = e.target.value === "" ? null : Number(e.target.value), style: "max-width:140px" });
   const rows = [
+    ...snip(s, "name"),
     el("label", {}, "Student"), el("div", { class: "full" }, who),
     el("label", {}, ""), el("div", { class: "full" }, finder, datalist),
   ];
@@ -210,8 +222,8 @@ function renderForm(s) {
       el("input", { value: f.new.grade, placeholder: "Grade", style: "max-width:80px;flex:none", oninput: (e) => f.new.grade = e.target.value })));
     if (f.new.name && !f.new.name.trim().includes(" ")) rows.push(el("label", {}, ""), el("div", { class: "hint" }, "Only a first name: the certificate will print just this."));
   }
-  rows.push(el("label", {}, "Teacher"), el("div", { class: "full" }, teacher, otherTeacher));
-  rows.push(el("label", {}, "Pages"), el("div", { class: "full" }, pages, el("span", { class: "hint", style: "align-self:center" }, `read ${fmt(s.read.pages)}`)));
+  rows.push(...snip(s, "teacher"), el("label", {}, "Teacher"), el("div", { class: "full" }, teacher, otherTeacher));
+  rows.push(...snip(s, "total"), el("label", {}, "Pages"), el("div", { class: "full" }, pages, el("span", { class: "hint", style: "align-self:center" }, `read ${fmt(s.read.pages)}`)));
   if (f.mode === "student" && s.read.name) {
     const p = state.roster.find((x) => x.id === f.student);
     if (p && p.name.toLowerCase() !== s.read.name.trim().toLowerCase())

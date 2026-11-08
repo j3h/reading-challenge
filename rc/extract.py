@@ -37,6 +37,9 @@ PRICES = {  # $ per million tokens (input, output) for the cost estimate
 }
 
 CONFIDENCE = ["high", "low", "unreadable"]
+BOX_FIELDS = ["name", "teacher", "month", "total"]
+_BOX = {"type": "object", "properties": {k: {"type": "integer"} for k in ("x0", "y0", "x1", "y1")},
+        "required": ["x0", "y0", "x1", "y1"], "additionalProperties": False}
 SCHEMA = {
     "type": "object",
     "properties": {
@@ -56,10 +59,12 @@ SCHEMA = {
             "properties": {"title": {"type": "string"}, "pages": {"type": "integer"}},
             "required": ["title", "pages"], "additionalProperties": False}},
         "note": {"type": "string"},
+        "boxes": {"type": "object", "properties": {f: _BOX for f in BOX_FIELDS},
+                  "required": BOX_FIELDS, "additionalProperties": False},
     },
     "required": ["is_reading_sheet", "name", "name_confidence", "teacher", "teacher_confidence", "month",
                  "has_total", "total_pages", "total_confidence", "total_where", "other_total_candidates",
-                 "rows", "note"],
+                 "rows", "note", "boxes"],
     "additionalProperties": False,
 }
 
@@ -85,6 +90,9 @@ month. Read the page and report what is written.
   digit, a crossed-out total you replaced, a total that clearly belongs to another month). Do not comment on
   the date or month, on rows that do not add up to the total, or on how tidy the sheet is. Empty string if
   nothing needs checking.
+- boxes: where on the page you read the name, teacher, month and total_pages, as x0, y0, x1, y1 on a 0-1000
+  scale of the page width and height (0,0 is the top-left corner). Cover the handwriting itself, not the printed
+  label. All four numbers 0 if that value is not on the page.
 """
 
 
@@ -179,7 +187,17 @@ def to_record(file: str, page: int, a: dict) -> rv.SheetRecord | None:
     if not a["name"].strip():
         who = rv.UNREADABLE
     return rv.SheetRecord(file, page, a["name"].strip(), a["teacher"].strip(), a["month"].strip(), pages,
-                          confidence=who, pages_confidence=conf, note="; ".join(notes))
+                          confidence=who, pages_confidence=conf, note="; ".join(notes), boxes=clean_boxes(a))
+
+
+def clean_boxes(a: dict) -> dict:
+    """{field: [x0, y0, x1, y1]} on a 0-1000 scale, only for sensible boxes (older answers have none)."""
+    out = {}
+    for f, b in (a.get("boxes") or {}).items():
+        x0, y0, x1, y1 = (max(0, min(1000, int(b.get(k, 0)))) for k in ("x0", "y0", "x1", "y1"))
+        if x1 > x0 and y1 > y0:
+            out[f] = [x0, y0, x1, y1]
+    return out
 
 
 # ------------------------------------------------------------------ a whole month

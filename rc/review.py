@@ -45,6 +45,7 @@ class SheetRecord:
     confidence: str = HIGH     # worst confidence among name / teacher / pages
     pages_confidence: str = HIGH
     note: str = ""             # anything extraction wants a person to see ("two totals: 158 vs 2300")
+    boxes: dict = field(default_factory=dict)   # where each value was read: {"name": [x0, y0, x1, y1]} on 0-1000
 
     @property
     def key(self) -> str:

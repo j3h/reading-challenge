@@ -205,3 +205,14 @@ def test_extracted_records_flow_into_review_and_a_finished_month(tmp_path):
     cli.main(["--data", str(tmp_path), "finish", "--month", "October 2026"])
     names = {s.name: s.total for s in ck.load(mf.checkpoint).students.values()}
     assert names == {"Ada Example": 104, "Nia Newcomer": 40}
+
+
+def test_where_each_value_was_read_is_kept_and_bad_boxes_are_dropped():
+    a = answer(boxes={"name": {"x0": 600, "y0": 50, "x1": 900, "y1": 90},
+                      "teacher": {"x0": 0, "y0": 0, "x1": 0, "y1": 0},            # not on the page
+                      "month": {"x0": 900, "y0": 10, "x1": 1200, "y1": 5},        # nonsense
+                      "total": {"x0": 700, "y0": 850, "x1": 800, "y1": 890}})
+    r = ex.to_record("s.pdf", 1, a)
+    assert r.boxes == {"name": [600, 50, 900, 90], "total": [700, 850, 800, 890]}
+    assert ex.to_record("s.pdf", 1, answer()).boxes == {}          # answers saved before boxes existed
+    assert set(ex.SCHEMA["properties"]["boxes"]["required"]) == {"name", "teacher", "month", "total"}

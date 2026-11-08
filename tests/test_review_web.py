@@ -192,3 +192,18 @@ def test_a_student_with_no_teacher_gets_the_sheets_teacher_pre_filled(month):
     app.decide("scan.pdf#2", {"student": "S0002", "remember_name": True})      # chosen earlier, teacher not yet
     form = by_key(app.state())["scan.pdf#2"]["form"]
     assert form["student"] == "S0002" and form["teacher"] == "Tracy"
+
+
+def test_snippets_of_the_scan_are_cut_where_each_value_was_read(month):
+    recs = rv.load_records(month.records_path)
+    recs[0] = rv.SheetRecord(**{**recs[0].__dict__, "boxes": {"name": [100, 100, 400, 140]}})
+    rv.save_records(recs, month.records_path)
+    app = web.ReviewApp(month)
+    assert by_key(app.state())["scan.pdf#1"]["read"]["boxes"] == ["name"]
+    img = app.scan_crop("scan.pdf#1", "name")
+    assert img[:3] == b"\xff\xd8\xff"
+    pix = pymupdf.Pixmap(img)
+    assert pix.width < 612 * 150 / 72 / 1.5 and pix.height < pix.width       # a strip, not the whole page
+    with pytest.raises(KeyError):
+        app.scan_crop("scan.pdf#1", "total")
+    assert rv.load_records(month.records_path)[0].boxes == {"name": [100, 100, 400, 140]}

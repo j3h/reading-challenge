@@ -65,7 +65,8 @@ class ReviewApp:
             sheets.append({
                 "key": r.key, "label": r.label, "file": r.file, "page": r.page,
                 "read": {"name": r.name, "teacher": r.teacher, "month": r.month, "pages": r.pages,
-                         "confidence": r.confidence, "pages_confidence": r.pages_confidence, "note": r.note},
+                         "confidence": r.confidence, "pages_confidence": r.pages_confidence, "note": r.note,
+                         "boxes": sorted(r.boxes)},
                 "status": status, "decision": d, "outcome": self._outcome(item, cp),
                 "warnings": item.warnings,
                 "reasons": sug.reasons if sug else [],
@@ -149,6 +150,25 @@ class ReviewApp:
             self.month.finish()
         return self.state()
 
+    def scan_crop(self, key: str, field: str) -> bytes:
+        """A snippet of the scan around where `field` was read, so it can sit next to the value on screen."""
+        cache = f"{key}|{field}"
+        with self._lock:
+            if cache in self._images:
+                return self._images[cache]
+            rec = next((r for r in self.month.records() if r.key == key), None)
+            if rec is None or field not in rec.boxes:
+                raise KeyError(cache)
+            x0, y0, x1, y1 = rec.boxes[field]
+            padx, pady = max(25, (x1 - x0) * 0.3), max(15, (y1 - y0) * 0.6)   # the model's boxes are approximate
+            page = pymupdf.open(self.month.folder.scans / rec.file)[rec.page - 1]   # PDFs and pictures alike
+            w, h = page.rect.width, page.rect.height
+            clip = pymupdf.Rect(max(0, x0 - padx) * w / 1000, max(0, y0 - pady) * h / 1000,
+                                min(1000, x1 + padx) * w / 1000, min(1000, y1 + pady) * h / 1000)
+            pix = page.get_pixmap(dpi=150, clip=clip, colorspace=pymupdf.csRGB)
+            self._images[cache] = pix.tobytes("jpeg", jpg_quality=85)
+            return self._images[cache]
+
     def scan_image(self, key: str) -> bytes:
         with self._lock:
             if key in self._images:
@@ -217,6 +237,8 @@ def make_server(app: ReviewApp, port: int = 0) -> tuple[ThreadingHTTPServer, str
             try:
                 if url.path == "/api/state":
                     return self._json(200, app.state())
+                if url.path == "/crop":
+                    return self._send(200, app.scan_crop(query["key"][0], query["field"][0]), "image/jpeg")
                 if url.path == "/scan":
                     return self._send(200, app.scan_image(query["key"][0]), "image/jpeg")
             except KeyError:
