@@ -78,7 +78,7 @@ def master(tmp_path):
 
 
 def _with_teacher(cp, teacher="Lopez"):
-    """The importer leaves blank teachers blank; a person fills them in before the first month."""
+    """The importer leaves blank teachers blank; a person fills them in before they get a certificate."""
     fixed = cp.copy()
     for sid, s in fixed.students.items():
         if not s.teacher:
@@ -90,77 +90,64 @@ def by_name(cp):
     return {s.name: s for s in cp.students.values()}
 
 
-def test_reads_details_and_marks(master):
-    cp, _ = im.parse_master(master, TABLE)
+def test_reads_details_and_ignores_prize_marks(master):
+    cp, _ = im.parse_master(master)
     s = by_name(cp)
     assert len(cp.students) == 6 and cp.month is None
     assert (s["Ada Example"].teacher, s["Ada Example"].grade, s["Ada Example"].total) == ("Lopez", "2", 2206)
-    assert s["Ada Example"].last_level == 1000
-    assert s["Sam Sample"].total == 12528 and s["Sam Sample"].last_level == 10000   # late group read too
+    assert s["Sam Sample"].total == 12528            # "12528" without a comma reads too
     assert [x.id for x in cp.students.values()] == [f"S000{i}" for i in range(1, 7)]
 
 
 def test_prize_inventory_table_is_not_imported(master):
-    cp, _ = im.parse_master(master, TABLE)
+    cp, _ = im.parse_master(master)
     assert not any("bookmark" in s.name.lower() for s in cp.students.values())
 
 
-def test_clipped_header_is_resolved_and_unknown_levels_are_ignored(master):
-    cp, report = im.parse_master(master, TABLE)
-    assert by_name(cp)["Bo Brown"].last_level == 100       # the 50,000 mark does not count
-    assert any("50,000 - trophy" in line and "ignored" in line for line in report)
-    assert not any("Puddle" in line for line in report)     # '00 - $10 ...' was resolved to 85,000
+def test_prizes_come_from_the_change_in_total_so_the_marks_never_matter(master):
+    cp, report = im.parse_master(master)
+    # Sam Sample has 12,528 pages and x marks only up to 10,000: no prize is "owed" for the old total
+    assert not any("no x yet" in line or "marked as given" in line for line in report)
+    cp = _with_teacher(cp)
+    _, results = ck.apply_month(cp, "October 2026", [ck.Entry("S0003", 100)], TABLE)    # 12,528 -> 12,628
+    assert results[0].prizes == ()
+    _, results = ck.apply_month(cp, "October 2026", [ck.Entry("S0001", 1000)], TABLE)   # 2,206 -> 3,206
+    assert [p[1] for p in results[0].prizes] == ["2,500 Pages"]
 
 
 def test_report_flags_what_needs_a_person(master):
-    _, report = im.parse_master(master, TABLE)
+    _, report = im.parse_master(master)
     text = "\n".join(report)
     assert "Sam Sample: no teacher" in text
     assert "Rae Roe: no previous total" in text
-    assert "Cy Late: marked as given up to 2,500 pages but the total is only 2,280" in text
-    assert "Ada Example: total 2,206 reaches" not in text     # marks and total agree
-    assert "Io Li" not in text                                 # clean row, red text is only a note
-
-
-def test_owed_but_unmarked_prizes_are_reported(master):
-    cp, report = im.parse_master(master, TABLE)
-    # 12,528 pages but the last x is at 10,000: the 12,500 prize was never marked as given
-    assert any(line.startswith("Sam Sample: total 12,528 reaches 12,500 Pages") for line in report)
-    _, results = ck.apply_month(_with_teacher(cp), "October 2026", [ck.Entry("S0003", 0)], TABLE)
-    assert [p[1] for p in results[0].prizes] == ["12,500 Pages"]
+    assert "Ada Example" not in text and "Io Li" not in text      # clean rows; red text is only a note
 
 
 def test_red_text_is_kept_as_a_note(master):
-    cp, _ = im.parse_master(master, TABLE)
+    cp, _ = im.parse_master(master)
     assert "red" in by_name(cp)["Io Li"].notes and by_name(cp)["Ada Example"].notes == ""
 
 
 def test_a_child_without_a_teacher_cannot_get_a_certificate_until_fixed(master):
-    cp, _ = im.parse_master(master, TABLE)
+    cp, _ = im.parse_master(master)
     ck.apply_month(cp, "October 2026", [ck.Entry("S0001", 5)], TABLE)          # has a teacher: fine
     with pytest.raises(ck.CheckpointError, match="no teacher"):
         ck.apply_month(cp, "October 2026", [ck.Entry("S0003", 5)], TABLE)      # Sam Sample has none
 
 
 def test_imported_checkpoint_round_trips_through_xlsx(master, tmp_path):
-    cp, _ = im.parse_master(master, TABLE)
+    cp, _ = im.parse_master(master)
     path = tmp_path / "seed.xlsx"
     ck.save(cp, path)
     assert ck.load(path).students == cp.students
 
 
-def test_groups_that_disagree_are_refused(tmp_path):
-    path = make_master(tmp_path / "bad.pdf", scramble_late_names=True)
-    with pytest.raises(im.ImportProblem, match="do not line up"):
-        im.parse_master(path, TABLE)
-
-
-def test_unexpected_layout_is_refused(tmp_path):
+def test_a_pdf_that_is_not_the_master_is_refused(tmp_path):
     doc = pymupdf.open()
     doc.new_page().insert_text((72, 72), "not a master sheet")
     doc.save(tmp_path / "x.pdf")
-    with pytest.raises(im.ImportProblem, match="expected three equal groups"):
-        im.parse_master(tmp_path / "x.pdf", TABLE)
+    with pytest.raises(im.ImportProblem, match="found no student rows"):
+        im.parse_master(tmp_path / "x.pdf")
 
 
 def test_cli_writes_a_checkpoint_and_prints_a_summary(master, tmp_path, capsys):
@@ -172,18 +159,17 @@ def test_cli_writes_a_checkpoint_and_prints_a_summary(master, tmp_path, capsys):
 
 
 def test_questions_for_staff_lists_red_rows_and_missing_teachers(master, tmp_path):
-    cp, report = im.parse_master(master, TABLE)
+    cp, report = im.parse_master(master)
     text = im.questions_for_staff(cp, report)
     assert "Io Li - Biello/Tanner - grade K - 74 pages" in text       # the red row
     assert "Sam Sample - grade 4" in text                              # no teacher
-    assert "Cy Late: marked as given up to 2,500" in text
     out = tmp_path / "q.txt"
     im.main([str(master), "--out", str(tmp_path / "s.xlsx"), "--questions", str(out)])
     assert out.read_text() == text
 
 
 def test_teacher_alias_merges_two_labels_into_one_class(master, tmp_path):
-    cp, _ = im.parse_master(master, TABLE, teacher_aliases={"biello/tanner": "Biello"})
+    cp, _ = im.parse_master(master, teacher_aliases={"biello/tanner": "Biello"})
     assert by_name(cp)["Io Li"].teacher == "Biello" and by_name(cp)["Ada Example"].teacher == "Lopez"
     out = tmp_path / "s.xlsx"
     im.main([str(master), "--out", str(out), "--teacher-alias", "Biello/Tanner=Biello"])

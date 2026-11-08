@@ -19,7 +19,7 @@ def build(spec):
     cp = ck.Checkpoint()
     entries = []
     for name, teacher, prev, pages in spec:
-        s = ck.add_student(cp, name, teacher, total=prev, table=TABLE)
+        s = ck.add_student(cp, name, teacher, total=prev)
         entries.append(ck.Entry(s.id, pages))
     return ck.apply_month(cp, "October 2026", entries, TABLE)[1]
 

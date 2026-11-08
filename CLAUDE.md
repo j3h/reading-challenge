@@ -65,17 +65,19 @@ from a CSV of children's page counts. Replaces a Canva "bulk create" workflow; w
 ## New pipeline (`rc/`, in progress): scans -> checkpoint + classroom print PDF
 Replaces the CSV/tracker flow. Built backwards from the printout; all pieces below exist and are tested
 except extraction (OCR), the review UI and the one-command runner.
-- `rc/checkpoint.py`  students, running totals, `last_level` (highest prize given); `apply_month()`;
-  xlsx save/load. A month is applied once and only after the previous one. Every student needs a teacher.
+- `rc/checkpoint.py`  students and running totals; `apply_month()`; xlsx save/load. **Prizes are the levels a
+  month's pages cross (previous < threshold <= new total), exactly what the certificate shows**; nothing is
+  carried over, so a reported mistake is fixed by hand (edit the total, hand over the prize). A month is applied once and only after the previous one. Every student needs a teacher.
 - `rc/render.py`      print PDF: per teacher a cover page (prize tally + bagging checklist), then that
   class's certificates (drawn by `make_certificates.draw_certificate`, unchanged). Letter landscape.
-- `rc/import_master.py` one-time: master spreadsheet printed to PDF -> first checkpoint. The "x" prize
-  marks set `last_level`; no x means the prize is owed. Cross-checked against totals in its report.
+- `rc/import_master.py` one-time: master spreadsheet printed to PDF -> first checkpoint (name, teacher, grade,
+  previous total). The prize "x" columns are deliberately ignored. `--teacher-alias OLD=NEW` merges classes.
 - `rc/workspace.py`   data folder (outside git, e.g. iCloud Drive): `<season>/<month>/{scans,work,
   checkpoint.xlsx,certificates.pdf,summary.txt}`. **Totals reset every school year (July-June)**; a new
   season starts with no checkpoint, and last season's final one is used only as name/teacher hints.
 - `rc/matching.py`    sheet name + teacher -> student: exact / likely / ambiguous / hint / none.
 - `rc/review.py`      turns extracted sheet records + a person's decisions into entries; nothing is settled
-  silently unless the name matches exactly and every field was read confidently.
+  silently unless the name matches exactly and every field was read confidently. A student with no
+  teacher must have one looked up by the operator (no automated source): `decide <sheet> --teacher X`.
 - Tests use made-up children only. Run with `.venv/bin/python -m pytest -q` (Python via `uv`, see below).
 - Python: the system `python3` shim is broken on this Mac; use `uv venv .venv && uv pip install -r requirements.txt`.

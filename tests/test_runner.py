@@ -25,10 +25,10 @@ def run(*argv):
 def data(tmp_path):
     """A data folder with a starting checkpoint for 2026-27."""
     cp = ck.Checkpoint()
-    ck.add_student(cp, "Ada Example", "Lopez", "2", total=74, table=TABLE)       # S0001
-    ck.add_student(cp, "Sam Sample", "Park", "K", table=TABLE)                   # S0002
-    ck.add_student(cp, "Io Li", "Park", "3", total=2400, table=TABLE)            # S0003
-    ck.add_student(cp, "Absent Al", "Lopez", "1", total=10, table=TABLE)         # S0004: no sheet in October
+    ck.add_student(cp, "Ada Example", "Lopez", "2", total=74)       # S0001
+    ck.add_student(cp, "Sam Sample", "Park", "K")                   # S0002
+    ck.add_student(cp, "Io Li", "Park", "3", total=2400)            # S0003
+    ck.add_student(cp, "Absent Al", "Lopez", "1", total=10)         # S0004: no sheet in October
     start = tmp_path / "2026-27" / "start"
     start.mkdir(parents=True)
     ck.save(cp, start / "checkpoint.xlsx")
@@ -64,7 +64,6 @@ def test_a_clean_month_finishes_and_writes_everything(data, capsys):
     assert new.month == "2026-10"
     assert {s.name: s.total for s in new.students.values()} == {
         "Ada Example": 104, "Sam Sample": 5, "Io Li": 2550, "Absent Al": 10}
-    assert {s.name: s.last_level for s in new.students.values()}["Io Li"] == 2500
 
     texts = [p.get_text().replace("\xa0", " ") for p in pymupdf.open(mf.certificates)]
     assert texts[0].startswith("Lopez") and texts[2].startswith("Park")      # cover pages
@@ -174,3 +173,19 @@ def test_import_master_command_refuses_to_overwrite(data, tmp_path):
     with pytest.raises(SystemExit, match="already exists"):
         run("--data", str(data), "import-master", str(tmp_path / "m.pdf"), "--season", "2026-27")
     assert existing.exists()
+
+
+def test_an_existing_student_with_no_teacher_is_resolved_from_the_command_line(data):
+    start = data / "2026-27" / "start" / "checkpoint.xlsx"
+    cp = ck.load(start)
+    cp.students["S0002"] = ck.replace(cp.students["S0002"], teacher="")
+    ck.save(cp, start)
+    mf = sheets(data, [rec(1, "Sam Sample", "", 150)])
+    month = ("--month", "October 2026")
+    with pytest.raises(SystemExit, match="1"):
+        run("--data", str(data), "check", *month)
+    run("--data", str(data), "decide", *month, "oct.pdf#1", "--teacher", "Park")      # bare --teacher: for Sam
+    run("--data", str(data), "finish", *month)
+    sam = next(s for s in ck.load(mf.checkpoint).students.values() if s.name == "Sam Sample")
+    assert (sam.teacher, sam.total) == ("Park", 150)
+    assert "teacher for Sam Sample set to Park" in mf.summary.read_text()

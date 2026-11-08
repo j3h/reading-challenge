@@ -15,20 +15,14 @@ TABLE = mc.load_levels()
 @pytest.fixture
 def cp():
     c = ck.Checkpoint()
-    ck.add_student(c, "Ada Example", "Lopez", "2", total=74, table=TABLE)       # S0001
-    ck.add_student(c, "Sam Sample", "Park", "K", total=0, table=TABLE)          # S0002
-    ck.add_student(c, "Io Li", "Park", "3", total=2400, table=TABLE)            # S0003
+    ck.add_student(c, "Ada Example", "Lopez", "2", total=74)       # S0001
+    ck.add_student(c, "Sam Sample", "Park", "K", total=0)          # S0002
+    ck.add_student(c, "Io Li", "Park", "3", total=2400)            # S0003
     return c
 
 
 def labels(result):
     return [p[1] for p in result.prizes]
-
-
-def test_seed_assumes_earlier_prizes_were_given(cp):
-    assert cp.students["S0001"].last_level == 1        # 74 pages: First Pages only
-    assert cp.students["S0003"].last_level == 1000     # 2,400: up to 1,000
-    assert cp.students["S0002"].last_level == 0
 
 
 def test_apply_month_totals_and_prizes(cp):
@@ -61,14 +55,16 @@ def test_prizes_are_given_only_once(cp):
     cp2, r1 = ck.apply_month(cp, "2026-10", [ck.Entry("S0001", 30)], TABLE)
     cp3, r2 = ck.apply_month(cp2, "2026-11", [ck.Entry("S0001", 10)], TABLE)
     assert labels(r1[0]) == ["100 Pages"] and r2[0].prizes == ()
-    assert cp3.students["S0001"].last_level == 100
+    assert cp3.students["S0001"].total == 114
 
 
-def test_missed_child_keeps_owed_prizes_for_next_time(cp):
-    # A child whose last_level lags their total (e.g. total corrected upward by hand) is owed the gap.
-    cp.students["S0001"] = ck.replace(cp.students["S0001"], total=600)   # 74 -> 600 edited in Students sheet
+def test_prizes_follow_the_change_in_total_not_the_stored_history(cp):
+    # A total corrected by hand does not make prizes appear; only this month's pages can cross a level.
+    cp.students["S0001"] = ck.replace(cp.students["S0001"], total=600)
     _, results = ck.apply_month(cp, "2026-10", [ck.Entry("S0001", 0)], TABLE)
-    assert labels(results[0]) == ["100 Pages", "500 Pages"]
+    assert results[0].prizes == ()
+    _, results = ck.apply_month(cp, "2026-10", [ck.Entry("S0001", 450)], TABLE)      # 600 -> 1,050
+    assert labels(results[0]) == ["1,000 Pages"]
 
 
 def test_children_without_an_entry_are_carried_forward(cp):
@@ -105,7 +101,7 @@ def test_new_student_needs_a_teacher(cp):
     with pytest.raises(ck.CheckpointError, match="classroom teacher"):
         ck.add_student(cp, "New Kid", "  ")
     s = ck.add_student(cp, "New Kid", "Lopez")
-    assert s.id == "S0004" and s.total == 0 and s.last_level == 0
+    assert s.id == "S0004" and s.total == 0
 
 
 def test_new_student_joining_with_pages_this_month_gets_first_pages(cp):

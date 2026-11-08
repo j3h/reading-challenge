@@ -11,6 +11,7 @@ apply. Nothing is ever settled silently except an exact name match with every fi
 
 Decisions, keyed by sheet ("<file>#<page>"):
     {"student": "S0003"}                          this sheet is that student
+    {"teacher": "Moren"}                          teacher for an existing student who has none on file
     {"new_student": {"name":..., "teacher":..., "grade":..., "total": 0}}   add a student
     {"skip": "reason"}                            ignore this sheet
     {"pages": 120}                                use this page count (overrides the read one)
@@ -64,6 +65,7 @@ class Issue:
 class Settled:
     record: SheetRecord
     student_id: str | None = None          # existing student
+    set_teacher: str = ""                  # teacher to record for an existing student who had none
     new_student: dict | None = None        # to be added
     pages: int | None = None
     skipped: str = ""
@@ -154,6 +156,15 @@ def plan(records: list[SheetRecord], cp: ck.Checkpoint, batch_month: str, decisi
             issues.append(Issue(rec.key, "who", f"{rec.label}: {rec.name or '(no name)'} / {rec.teacher or '(no teacher)'}"
                                                 f" - {why}", m.candidates))
 
+        # a classroom is needed for the certificate: the operator has to look it up (no automated source)
+        if item.student_id and not cp.students[item.student_id].teacher.strip():
+            if d.get("teacher", "").strip():
+                item.set_teacher = d["teacher"].strip()
+            else:
+                issues.append(Issue(rec.key, "teacher",
+                                    f"{rec.label}: {cp.students[item.student_id].name} has no teacher on file; "
+                                    f"look it up and enter it", tuple(teachers)))
+
         # how many pages?
         if "pages" in d:
             item.pages = int(d["pages"])
@@ -216,6 +227,11 @@ def finalize(p: Plan, cp: ck.Checkpoint, table=None) -> tuple[ck.Checkpoint, lis
     cp = cp.copy()
     entries, notes, created = [], [], {}
     for item in p.settled:
+        if item.student_id and item.set_teacher and not item.skipped:
+            old = cp.students[item.student_id]
+            cp.students[old.id] = ck.replace(old, teacher=item.set_teacher)
+            notes.append(f"teacher for {old.name} set to {item.set_teacher} ({item.record.label})")
+    for item in p.settled:
         rec = item.record
         if item.skipped:
             notes.append(f"skipped {rec.label} ({rec.name or 'no name'}): {item.skipped}")
@@ -226,7 +242,7 @@ def finalize(p: Plan, cp: ck.Checkpoint, table=None) -> tuple[ck.Checkpoint, lis
             ident = _identity(item, cp)
             if ident not in created:
                 s = ck.add_student(cp, n["name"], n["teacher"], str(n.get("grade", "")), int(n.get("total", 0) or 0),
-                                   table=table, notes=f"added {rec.label}")
+                                   notes=f"added {rec.label}")
                 created[ident] = s.id
                 notes.append(f"new student {s.name} ({s.teacher}) from {rec.label}")
             sid = created[ident]

@@ -50,13 +50,30 @@ def cmd_check(args):
     sys.exit(1 if p.issues else 0)
 
 
+def _is_new_student(m, args, current):
+    """Does this --teacher/--grade belong to a student being added, or to someone already on the roster?"""
+    if args.new_name or args.grade or "new_student" in current:
+        return True
+    if args.student or "student" in current or not args.teacher:
+        return False
+    match = m.plan().matches.get(args.sheet)         # a bare --teacher: for whoever the sheet matched
+    return match is None or match.status != "exact"
+
+
 def cmd_decide(args):
     m = _month(args)
     d = {}
     if args.student:
         d["student"] = args.student
-    if args.new_name or args.teacher:
-        d["new_student"] = {"name": args.new_name or "", "teacher": args.teacher or "", "grade": args.grade or ""}
+    current = m.decisions().get(args.sheet, {})
+    if _is_new_student(m, args, current):
+        merged = dict(current.get("new_student", {}))
+        for key, value in (("name", args.new_name), ("teacher", args.teacher), ("grade", args.grade)):
+            if value:
+                merged[key] = value
+        d["new_student"] = merged
+    elif args.teacher:
+        d["teacher"] = args.teacher
     if args.skip:
         d["skip"] = args.skip
     if args.pages is not None:

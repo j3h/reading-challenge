@@ -16,9 +16,9 @@ TABLE = mc.load_levels()
 @pytest.fixture
 def cp():
     c = ck.Checkpoint()
-    ck.add_student(c, "Ada Example", "Lopez", "2", total=74, table=TABLE)       # S0001
-    ck.add_student(c, "Sam Sample", "Park", "K", table=TABLE)                   # S0002
-    ck.add_student(c, "Io Li", "Park", "3", total=2400, table=TABLE)            # S0003
+    ck.add_student(c, "Ada Example", "Lopez", "2", total=74)       # S0001
+    ck.add_student(c, "Sam Sample", "Park", "K")                   # S0002
+    ck.add_student(c, "Io Li", "Park", "3", total=2400)            # S0003
     return c
 
 
@@ -73,7 +73,9 @@ def test_new_student_can_join_with_an_existing_total(cp):
     p = rv.plan([rec(1, "Joiner Jones", "Park", 5)], cp, "October 2026", done)
     cp2, entries, _ = rv.finalize(p, cp, TABLE)
     s = cp2.students[entries[0].student_id]
-    assert s.total == 700 and s.last_level == 500        # prizes up to 500 assumed already given
+    assert s.total == 700
+    _, results = ck.apply_month(cp2, "October 2026", entries, TABLE)
+    assert results[0].prizes == ()                     # 700 -> 705 crosses nothing: no prizes for the old total
 
 
 def test_missing_or_unreadable_pages_need_an_answer(cp):
@@ -159,3 +161,24 @@ def test_end_to_end_plan_to_printed_totals(cp):
     by = {r.student.name: [x[1] for x in r.prizes] for r in results}
     assert by == {"Ada Example": ["100 Pages"], "Quentin Quimby": ["First Pages", "100 Pages"]}
     assert new_cp.month == "2026-10"
+
+
+def test_a_student_on_the_roster_with_no_teacher_needs_one_looked_up(cp):
+    cp.students["S0002"] = ck.replace(cp.students["S0002"], teacher="")
+    records = [rec(1, "Sam Sample", "", 5)]
+    p = rv.plan(records, cp, "October 2026", {})
+    assert kinds(p) == [("oct.pdf#1", "teacher")] and "no teacher on file" in p.issues[0].message
+    assert "Lopez" in p.issues[0].candidates                      # offers the known teachers
+    p = rv.plan(records, cp, "October 2026", {"oct.pdf#1": {"teacher": " Park "}})
+    assert p.ready
+    cp2, entries, notes = rv.finalize(p, cp, TABLE)
+    assert cp2.students["S0002"].teacher == "Park" and cp.students["S0002"].teacher == ""
+    assert any("teacher for Sam Sample set to Park" in n for n in notes)
+    _, results = ck.apply_month(cp2, "October 2026", entries, TABLE)
+    assert results[0].student.teacher == "Park"
+
+
+def test_a_skipped_sheet_does_not_need_a_teacher_looked_up(cp):
+    cp.students["S0002"] = ck.replace(cp.students["S0002"], teacher="")
+    p = rv.plan([rec(1, "Sam Sample", "", 5)], cp, "October 2026", {"oct.pdf#1": {"skip": "blank"}})
+    assert p.ready
