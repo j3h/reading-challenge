@@ -65,6 +65,9 @@
   .box ul { margin: 2px 0 0; padding-left: 18px; }
   .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
   .hint { color: var(--muted); font-size: 12px; }
+  tr.bar-row td { background: var(--sel); padding: 0 10px 10px; border-bottom: 1px solid var(--line); }
+  .ctl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding-top: 8px; border-top: 1px dashed var(--line); }
+  .ctl u { text-decoration-thickness: 2px; text-underline-offset: 2px; }
   tr.sheet td { background: var(--sel); padding: 0 10px 14px; }
   tr.sheet img { display: block; width: 100%; max-width: 900px; margin: 0 auto; border: 1px solid var(--line); border-radius: 8px; }
   pre.summary { white-space: pre-wrap; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
@@ -81,7 +84,7 @@
 </header>
 <div class="bar">
   <label><input type="checkbox" id="onlyOpen"> only rows that need a look</label>
-  <span><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> accept row &amp; go to next that needs a look · <kbd>Esc</kbd> close row</span>
+  <span><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> accept row &amp; go to next that needs a look · <kbd>A</kbd> accept · <kbd>S</kbd> skip · <kbd>R</kbd> reset · <kbd>W</kbd> whole sheet (with <kbd>Alt</kbd> while typing) · <kbd>Esc</kbd> close row</span>
 </div>
 <div class="wrap" id="app"></div>
 <div id="error"></div>
@@ -153,6 +156,7 @@ function render() {
   const body = el("tbody");
   for (const s of visible()) {
     body.append(s.key === selected ? openRow(s) : closedRow(s));
+    if (s.key === selected) body.append(controlBar(s));
     if (s.key === selected && showSheet) body.append(el("tr", { class: "sheet" }, el("td", { colspan: 7 },
       el("img", { src: "/scan?key=" + encodeURIComponent(s.key) + "&t=" + TOKEN, alt: "Scanned sheet " + s.label }))));
   }
@@ -173,6 +177,31 @@ function closedRow(s) {
     el("td", {}, s.status === "open" ? el("span", { class: "why" }, s.reasons.join(" · ")) : el("span", { class: "muted" }, s.warnings[0] || "")));
 }
 
+// ---------------------------------------------------------------- actions (buttons in the bar under the open row, and keys)
+// Each has a one-letter key (underlined). Alt+letter works while typing in a field; the plain letter works otherwise.
+const ACTIONS = {
+  KeyA: () => accept(),
+  KeyS: () => { const s = sheet(); if (s && s.status !== "skipped") save({ skip: "skipped" }, true); },
+  KeyR: () => { const s = sheet(); if (s && Object.keys(s.decision).length && confirm(s.status === "skipped" ? "Un-skip this sheet?" : "Forget what was chosen for this sheet and go back to the suggestion?")) save({}, false); },
+  KeyW: () => { showSheet = !showSheet; render(); },
+};
+function keyed(text, letter) {           // "Skip" + "S" -> S̲kip, with the letter underlined
+  const i = text.toLowerCase().indexOf(letter.toLowerCase());
+  return i < 0 ? [text] : [text.slice(0, i), el("u", {}, text[i]), text.slice(i + 1)];
+}
+function controlBar(s) {
+  const btn = (code, text, attrs = {}) => el("button", { ...attrs, title: `${text} (${code.slice(3)}, or Alt+${code.slice(3)} while typing)`,
+    onclick: (e) => { e.stopPropagation(); ACTIONS[code](); } }, ...keyed(text, code.slice(3)));
+  const decided = Object.keys(s.decision).length > 0;
+  const left = s.status === "skipped"
+    ? [btn("KeyR", "Restore (un-skip)", { class: "primary" })]
+    : [btn("KeyA", s.status === "open" ? "Accept" : "Save", { class: "primary", id: "accept" }), el("span", { class: "hint" }, "or Enter"),
+       btn("KeyS", "Skip sheet"), decided ? btn("KeyR", "Reset to suggestion") : null];
+  return el("tr", { class: "bar-row" }, el("td", { colspan: 7 }, el("div", { class: "ctl" },
+    ...left, el("span", { style: "flex:1" }), el("span", { class: "hint" }, s.label),
+    btn("KeyW", showSheet ? "▾ Hide whole sheet" : "▸ Whole sheet"))));
+}
+
 function snip(s, field) {     // the handwriting a value was read from, right under the value
   if (!s.read.boxes.includes(field)) return null;
   const img = el("img", { class: "snip", alt: "", title: "What the sheet says (click to enlarge)",
@@ -186,8 +215,7 @@ function openRow(s) {
   const r = s.read, stop = (e) => e.stopPropagation();
   if (!form) form = JSON.parse(JSON.stringify(s.form));
   const f = form;
-  const statusCell = el("td", {}, el("div", { class: "stack" }, el("span", { class: "st " + s.status }, label[s.status]),
-    el("button", { onclick: (e) => { stop(e); showSheet = !showSheet; render(); }, title: s.label }, showSheet ? "Hide sheet" : "Whole sheet")));
+  const statusCell = el("td", {}, el("span", { class: "st " + s.status }, label[s.status]));
   const nameCell = el("td", {}, el("div", { class: "stack" },
     el("span", {}, r.name || "(no name)", r.confidence !== "high" ? el("span", { class: "unsure" }, " ?") : ""), snip(s, "name"),
     r.note ? el("span", { class: "hint" }, r.note) : null));
@@ -195,8 +223,7 @@ function openRow(s) {
     s.status === "open" && s.reasons.length ? el("div", { class: "box why" }, el("ul", {}, s.reasons.map((x) => el("li", {}, x)))) : null,
     ...s.warnings.map((w) => el("div", { class: "box info" }, w)), snip(s, "month")));
   if (s.status === "skipped") {
-    checkCell.firstChild.append(el("div", { class: "box info" }, s.outcome),
-      el("div", { class: "actions" }, el("button", { class: "primary", onclick: (e) => { stop(e); save({}, false); } }, "Un-skip")));
+    checkCell.firstChild.append(el("div", { class: "box info" }, s.outcome));
     return el("tr", { class: "row sel", onclick: () => open(s.key) }, statusCell, el("td", { class: "muted" }, s.page), nameCell,
       el("td"), el("td"), el("td"), checkCell);
   }
@@ -247,10 +274,6 @@ function openRow(s) {
   const pagesStack = el("div", { class: "stack" },
     el("input", { type: "number", min: 0, value: f.pages ?? "", oninput: (e) => f.pages = e.target.value === "" ? null : Number(e.target.value) }),
     snip(s, "total"));
-  checkCell.firstChild.append(el("div", { class: "actions" },
-    el("button", { class: "primary", id: "accept", onclick: (e) => { stop(e); accept(); } }, s.status === "open" ? "Accept ⏎" : "Save ⏎"),
-    el("button", { onclick: (e) => { stop(e); const why = prompt("Skip this sheet. Why?", "skipped"); if (why !== null) save({ skip: why || "skipped" }, true); } }, "Skip"),
-    Object.keys(s.decision).length ? el("button", { onclick: (e) => { stop(e); save({}, false); } }, "Reset") : null));
   const editable = (child) => el("td", { onclick: stop }, child);
   return el("tr", { class: "row sel", onclick: () => open(s.key) }, statusCell, el("td", { class: "muted" }, s.page), nameCell,
     editable(studentStack), editable(teacherStack), el("td", { class: "num", onclick: stop }, pagesStack), editable(checkCell.firstChild));
@@ -292,8 +315,10 @@ $("finish").addEventListener("click", async () => {
   try { state = await api("/api/finish", {}); render(); } catch (e) { fail(e.message); }
 });
 document.addEventListener("keydown", (e) => {
-  if (!state || state.finished || e.metaKey || e.ctrlKey || e.altKey) return;
-  const tag = document.activeElement.tagName;
+  if (!state || state.finished || e.metaKey || e.ctrlKey) return;
+  const tag = document.activeElement.tagName, typing = ["INPUT", "SELECT", "TEXTAREA"].includes(tag);
+  if (selected && ACTIONS[e.code] && (e.altKey || !typing) && !e.shiftKey) { e.preventDefault(); ACTIONS[e.code](); return; }
+  if (e.altKey) return;
   if (e.key === "Enter" && tag !== "BUTTON" && selected && $("accept")) { e.preventDefault(); accept(); return; }
   if (e.key === "Escape") { selected = null; form = null; showSheet = false; render(); return; }
   if (["INPUT", "SELECT", "TEXTAREA"].includes(tag)) return;

@@ -142,7 +142,7 @@ class ReviewApp:
                 if not new:
                     break
                 decisions.update(new)
-                rv.save_decisions(decisions, self.month.decisions_path)
+                rv.save_decisions(decisions, self.month.decisions_path, "accept all")
         return self.state()
 
     def finish(self) -> dict:

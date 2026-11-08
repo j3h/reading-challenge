@@ -99,8 +99,20 @@ def load_decisions(path) -> dict:
         raise ck.CheckpointError(f"{path}: decisions file is damaged ({e})") from None
 
 
-def save_decisions(decisions: dict, path) -> None:
+def save_decisions(decisions: dict, path, source: str = "") -> None:
+    """Write the decisions, and append every change to decisions.log next to it (one JSON line per sheet
+    changed: time, sheet, before, after, where from), so nothing a person decided can vanish without a trace."""
+    path = Path(path)
+    before = load_decisions(path) if path.exists() else {}
     wsp.write_atomic(path, json.dumps(decisions, indent=2, sort_keys=True, ensure_ascii=False))
+    from datetime import datetime
+    stamp = datetime.now().isoformat(timespec="seconds")
+    lines = [json.dumps({"time": stamp, "sheet": k, "before": before.get(k), "after": decisions.get(k), "source": source},
+                        ensure_ascii=False)
+             for k in sorted(set(before) | set(decisions)) if before.get(k) != decisions.get(k)]
+    if lines:
+        with open(path.with_name("decisions.log"), "a", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
 
 
 def load_records(path) -> list[SheetRecord]:

@@ -62,9 +62,9 @@ class Month:
             raise ck.CheckpointError(f"no sheet {key!r}; sheets are {', '.join(sorted(records)[:5])} ...")
         decisions = self.decisions()
         decisions.setdefault(key, {}).update(decision)
-        rv.save_decisions(decisions, self.decisions_path)
+        rv.save_decisions(decisions, self.decisions_path, "command line")
 
-    def set_decision(self, key: str, decision: dict) -> None:
+    def set_decision(self, key: str, decision: dict, source: str = "review screen") -> None:
         """Replace the whole decision for one sheet (an empty decision removes it) and save."""
         if key not in {r.key for r in self.records()}:
             raise ck.CheckpointError(f"no sheet {key!r}")
@@ -73,7 +73,7 @@ class Month:
             decisions[key] = decision
         else:
             decisions.pop(key, None)
-        rv.save_decisions(decisions, self.decisions_path)
+        rv.save_decisions(decisions, self.decisions_path, source)
 
     # ---- finishing
     def finish(self) -> str:

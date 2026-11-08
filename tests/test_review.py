@@ -279,3 +279,16 @@ def test_suggestion_uses_last_years_name_and_grade(cp):
 def test_a_confident_match_on_a_hard_to_read_name_says_so(cp):
     s = sug([rec(1, "Ada Example", "Lopez", 30, confidence=rv.LOW)], cp)["oct.pdf#1"]
     assert s.decision["student"] == "S0001" and s.reasons[0].startswith("name hard to read")
+
+
+def test_every_decision_change_is_logged(tmp_path):
+    import json
+    path = tmp_path / "work" / "decisions.json"
+    rv.save_decisions({"a#1": {"student": "S1"}}, path, "review screen")
+    rv.save_decisions({"a#1": {"student": "S1"}, "a#2": {"skip": "x"}}, path, "accept all")
+    rv.save_decisions({"a#2": {"skip": "x"}}, path, "review screen")
+    log = [json.loads(line) for line in (tmp_path / "work" / "decisions.log").read_text().splitlines()]
+    assert [(e["sheet"], e["before"], e["after"], e["source"]) for e in log] == [
+        ("a#1", None, {"student": "S1"}, "review screen"),
+        ("a#2", None, {"skip": "x"}, "accept all"),
+        ("a#1", {"student": "S1"}, None, "review screen")]
