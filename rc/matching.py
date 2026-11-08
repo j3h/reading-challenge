@@ -82,8 +82,17 @@ def name_score(sheet: str, known: str) -> tuple[float, str]:
     return min(best, 1.0), why
 
 
+HONORIFICS = {"ms", "mrs", "mr", "miss", "dr", "teacher"}
+
+
 def teacher_parts(teacher: str) -> list[str]:
-    return [p for p in (normalize(x) for x in re.split(r"[/&,]|\band\b", teacher or "")) if p]
+    """'Ms. Biello/Tanner' -> ['biello', 'tanner']: honorifics are dropped, co-teachers split."""
+    parts = []
+    for piece in re.split(r"[/&,]|\band\b", teacher or ""):
+        words = [w for w in normalize(piece).split() if w not in HONORIFICS]
+        if words:
+            parts.append(" ".join(words))
+    return parts
 
 
 def teacher_agreement(sheet_teacher: str, known_teacher: str) -> str:

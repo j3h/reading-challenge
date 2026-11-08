@@ -81,8 +81,10 @@ month. Read the page and report what is written.
 - total_confidence: "low" if any digit is uncertain or if you found two different candidate totals; list the
   other candidate number(s) in other_total_candidates. total_where: a few words saying where you found it.
 - rows: each book row with its title and the pages written for it (0 if the pages are unreadable).
-- note: anything a person checking this page should know, in one short sentence (a crossed-out row, a total
-  that clearly belongs to another month, a sheet that looks like a different template). Empty string if nothing.
+- note: only something that makes a name, teacher or total hard to trust, in one short sentence (a doubtful
+  digit, a crossed-out total you replaced, a total that clearly belongs to another month). Do not comment on
+  the date or month, on rows that do not add up to the total, or on how tidy the sheet is. Empty string if
+  nothing needs checking.
 """
 
 

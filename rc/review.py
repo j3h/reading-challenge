@@ -204,7 +204,7 @@ def plan(records: list[SheetRecord], cp: ck.Checkpoint, batch_month: str, decisi
         elif rec.pages is None or rec.pages_confidence == UNREADABLE:
             issues.append(Issue(rec.key, "pages", f"{rec.label}: page count could not be read" +
                                 (f" ({rec.note})" if rec.note else "")))
-        elif rec.pages_confidence == LOW or rec.note:
+        elif rec.pages_confidence == LOW:     # a note alone is shown to the person but never blocks
             if d.get("pages_ok"):
                 item.pages = rec.pages
             else:

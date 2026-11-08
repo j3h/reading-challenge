@@ -194,3 +194,9 @@ def test_a_skipped_sheet_does_not_need_a_teacher_looked_up(cp):
 ])
 def test_what_a_child_writes_for_the_month_is_compared_by_month_and_year(written, ok):
     assert rv.sheet_month_matches(written, "October 2026") is ok
+
+
+def test_a_note_alone_does_not_block_a_confident_page_count(cp):
+    records = [rec(1, "Ada Example", "Lopez", 158, note="rows add up to 140")]
+    p = rv.plan(records, cp, "October 2026", {})
+    assert p.ready and p.settled[0].pages == 158

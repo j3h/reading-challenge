@@ -124,3 +124,10 @@ def test_every_student_in_a_realistic_roster_matches_themselves():
     cp = roster(*[(n, "Park") for n in names])
     assert all(mt.match(n, "Park", cp).status == mt.EXACT and mt.match(n, "Park", cp).best.student.name == n
                for n in names)
+
+
+def test_honorifics_on_the_teacher_are_ignored():
+    for written in ("Ms. Biello", "Mrs Biello", "Mr. Biello", "Miss Biello", "biello"):
+        assert mt.teacher_agreement(written, "Biello/Tanner") == "agree"
+    assert mt.teacher_agreement("Ms. Valters", "Walters") == "agree"
+    assert mt.teacher_agreement("Ms", "Walters") == "unknown"
