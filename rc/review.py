@@ -11,6 +11,7 @@ apply. Nothing is ever settled silently except an exact name match with every fi
 
 Decisions, keyed by sheet ("<file>#<page>"):
     {"student": "S0003"}                          this sheet is that student
+    {"remember_name": true}                       (with student) also match the name as written next time
     {"teacher": "Moren"}                          teacher for an existing student who has none on file
     {"new_student": {"name":..., "teacher":..., "grade":..., "total": 0}}   add a student
     {"skip": "reason"}                            ignore this sheet
@@ -67,6 +68,7 @@ class Settled:
     record: SheetRecord
     student_id: str | None = None          # existing student
     set_teacher: str = ""                  # teacher to record for an existing student who had none
+    remember_name: bool = False            # keep the name written on the sheet as one of this child's names
     new_student: dict | None = None        # to be added
     pages: int | None = None
     skipped: str = ""
@@ -170,6 +172,7 @@ def plan(records: list[SheetRecord], cp: ck.Checkpoint, batch_month: str, decisi
                                     m.candidates))
             else:
                 item.student_id = d["student"]
+                item.remember_name = bool(d.get("remember_name"))
         elif "new_student" in d:
             n = dict(d["new_student"])
             n["name"] = (n.get("name") or rec.name).strip()
@@ -254,6 +257,14 @@ def finalize(p: Plan, cp: ck.Checkpoint, table=None) -> tuple[ck.Checkpoint, lis
         raise ck.CheckpointError(f"{len(p.issues)} question(s) still open; first: {p.issues[0].message}")
     cp = cp.copy()
     entries, notes, created = [], [], {}
+    for item in p.settled:
+        if item.student_id and item.remember_name and not item.skipped:
+            old = cp.students[item.student_id]
+            written = item.record.name.strip()
+            known = {mt.normalize(old.name)} | {mt.normalize(n) for n in old.nickname_list}
+            if written and mt.normalize(written) not in known:
+                cp.students[old.id] = ck.replace(old, nicknames=", ".join(old.nickname_list + [written]))
+                notes.append(f"{old.name} will also be recognised as {written!r} ({item.record.label})")
     for item in p.settled:
         if item.student_id and item.set_teacher and not item.skipped:
             old = cp.students[item.student_id]

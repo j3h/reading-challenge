@@ -76,6 +76,12 @@ except extraction (OCR), the review UI and the one-command runner.
   checkpoint.xlsx,certificates.pdf,summary.txt}`. **Totals reset every school year (July-June)**; a new
   season starts with no checkpoint, and last season's final one is used only as name/teacher hints.
 - `rc/matching.py`    sheet name + teacher -> student: exact / likely / ambiguous / hint / none.
+- `rc/extract.py`     reads scans with Claude vision (`claude-opus-5-5`) into `work/records.json`; every raw answer is
+  cached in `work/raw/` so re-runs are free. Run as `op run --env-file=.env -- python -m rc --data D extract --month M`
+  (`.env` holds only a 1Password reference). First measured cost: about $0.28 per 10 pages.
+- `rc/review_web.py` + `rc/review.html`  `python -m rc --data D review --month M`: local page (127.0.0.1, token-guarded) with the scan
+  beside each question; saves to `work/decisions.json` as you go. Nicknames: built-in groups (Rozzie/Rosalind) plus
+  per-child "Also called" names remembered from review. Page text is only ever set with textContent (handwriting is untrusted).
 - `rc/review.py`      turns extracted sheet records + a person's decisions into entries; nothing is settled
   silently unless the name matches exactly and every field was read confidently. A student with no
   teacher must have one looked up by the operator (no automated source): `decide <sheet> --teacher X`.

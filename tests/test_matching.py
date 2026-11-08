@@ -131,3 +131,20 @@ def test_honorifics_on_the_teacher_are_ignored():
         assert mt.teacher_agreement(written, "Biello/Tanner") == "agree"
     assert mt.teacher_agreement("Ms. Valters", "Walters") == "agree"
     assert mt.teacher_agreement("Ms", "Walters") == "unknown"
+
+
+def test_common_nicknames_match_the_full_first_name():
+    cp = roster(("Rosalind Cox", "Tracy"), ("Joseph Smith", "Park"), ("Zoe Zimmer", "Park"))
+    m = mt.match("Rozzie", "Tracy", cp)
+    assert m.status == mt.LIKELY and m.best.student.name == "Rosalind Cox" and m.best.reason.startswith("nickname")
+    assert mt.match("Joey Smith", "Park", cp).best.student.name == "Joseph Smith"
+    assert mt.match("Rozzie", "", cp).status in (mt.AMBIGUOUS, mt.LIKELY) and mt.match("Rozzie", "", cp).best.score < 0.8
+    assert mt.name_group("rozzie") >= {"rosalind", "roz"} and mt.name_group("zzz") == {"zzz"}
+
+
+def test_a_name_the_child_is_known_by_matches_exactly():
+    cp = roster(("Rosalind Cox", "Tracy"), ("Rose Rosen", "Tracy"))
+    cp.students["S0001"] = ck.replace(cp.students["S0001"], nicknames="Rozzie, Ros C")
+    m = mt.match("Rozzie", "Tracy", cp)
+    assert m.status == mt.EXACT and m.best.student.id == "S0001" and "also called Rozzie" in m.best.reason
+    assert mt.match("Ros C", "Tracy", cp).best.student.id == "S0001"

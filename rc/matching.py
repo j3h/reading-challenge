@@ -38,11 +38,56 @@ def normalize(text: str) -> str:
     return " ".join(text.split())
 
 
+# Names a child may write instead of the one on the roster. Each set is interchangeable (a first name only).
+NICKNAME_GROUPS = [set(g.split()) for g in """
+rosalind roz rozzie rosie ros|joseph joe joey|william will bill billy willy liam|elizabeth liz lizzie beth eliza libby betsy
+katherine catherine kate katie kathy kat kitty|margaret maggie meg peggy greta|alexander alex xander sandy|alexandra alex lexi
+michael mike mikey|matthew matt matty|benjamin ben benny benji|daniel dan danny|david dave davey|jonathan jon jonny john johnny
+samuel sam sammy|thomas tom tommy|nicholas nick nicky nico|christopher chris topher kit|andrew andy drew|anthony tony
+charles charlie chuck|edward ed eddie ted teddy|henry hank harry hal|richard rich rick ricky dick|robert rob robbie bob bobby
+james jim jimmy jamie|patrick pat paddy|theodore theo ted teddy|timothy tim timmy|zachary zach zack zac|abigail abby abbie gail
+amelia millie mellie amy|isabella isabelle isabel bella izzy izzie belle|madeline madelyn madeleine maddie maddy madi
+olivia liv livvy ollie olive|victoria vicky tori tory|jacqueline jackie jacqui|jennifer jen jenny|jessica jess jessie
+rebecca becca becky|samantha sam sammy sami|stephanie steph stevie|sophia sofia sophie sofie|gabriella gabrielle gabby gabi
+eleanor ellie elle nora norah nell|penelope penny nell|josephine josie jo|juliana julia julie jules|lucas luke luca
+maximilian maxwell max maxim|francisco paco frankie frank|frances fran frannie franny|nathaniel nate nathan nat
+ellen ellie nell|susan sue suzy susie|deborah deb debbie|barbara barb barbie babs|dorothy dot dottie dolly|evelyn evie eve
+cassandra cassie cass|caroline carrie caro lina|vincent vince vinny|ronald ron ronnie|gregory greg|raymond ray|leonard leo len lenny
+""".strip().replace("\n", "|").split("|") if g.strip()]
+
+
+def name_group(token: str) -> set[str]:
+    """Every first name the same child might write instead of `token` (just {token} when none is known)."""
+    out = {token}
+    for g in NICKNAME_GROUPS:
+        if token in g:
+            out |= g
+    return out
+
+
 def _ratio(a: str, b: str) -> float:
     return SequenceMatcher(None, a, b).ratio()
 
 
-def name_score(sheet: str, known: str) -> tuple[float, str]:
+def name_score(sheet: str, known: str, nicknames=()) -> tuple[float, str]:
+    """Best score of the sheet name against the known name, its common nicknames and the child's own."""
+    best = _name_score(sheet, known)
+    a, b = normalize(sheet).split(), normalize(known).split()
+    if a and b and a[0] != b[0] and a[0] in name_group(b[0]):       # Rozzie for Rosalind, Joey for Joseph
+        score, why = _name_score(" ".join([b[0]] + a[1:]), known)
+        if score * 0.95 > best[0]:
+            best = (round(score * 0.95, 3), "nickname")
+    for nick in nicknames:                                           # names this child is known to write
+        alt = nick if " " in nick.strip() else " ".join([nick] + b[1:])
+        score, why = _name_score(sheet, alt)
+        if len(a) == 1 and normalize(nick) == a[0]:
+            score, why = 1.0, "same name"
+        if score > best[0]:
+            best = (score, f"{why} (also called {nick})")
+    return best
+
+
+def _name_score(sheet: str, known: str) -> tuple[float, str]:
     """(0..1, why) for how well the name written on a sheet fits a known student name."""
     a, b = normalize(sheet), normalize(known)
     if not a or not b:
@@ -131,7 +176,7 @@ def _same_name(c: "Candidate") -> bool:
 def _score_pool(name, teacher, students, from_hints):
     out = []
     for s in students:
-        score, why = name_score(name, s.name)
+        score, why = name_score(name, s.name, s.nickname_list)
         if score < PLAUSIBLE_SCORE - 0.1:
             continue
         agreement = teacher_agreement(teacher, s.teacher)

@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reading Challenge review</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #deddd6;
+    --accent: #3b2fc9; --accent-ink: #ffffff; --open: #c2570c; --done: #19794a; --skip: #77777c;
+    --warn-bg: #fff4e5; --good-bg: #e8f5ee; --sel: #ecebff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #17171a; --panel: #222226; --ink: #ededf0; --muted: #a0a0a8; --line: #38383e;
+            --accent: #8f87ff; --accent-ink: #12121a; --open: #f0a05a; --done: #5fcf94; --skip: #9a9aa2;
+            --warn-bg: #3a2c1c; --good-bg: #1d3328; --sel: #2d2b52; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; gap: 16px; align-items: center; padding: 12px 20px; background: var(--panel);
+           border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; }
+  header .counts { color: var(--muted); flex: 1; }
+  button, select, input { font: inherit; color: inherit; }
+  button { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  input, select { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+  main { display: grid; grid-template-columns: 240px minmax(300px, 1fr) minmax(340px, 480px); gap: 16px;
+         padding: 16px 20px; align-items: start; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+  #list { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px;
+          max-height: calc(100vh - 100px); overflow: auto; position: sticky; top: 70px; }
+  #list label.filter { display: block; padding: 4px 8px 8px; color: var(--muted); font-size: 13px; }
+  .item { display: flex; gap: 8px; align-items: baseline; width: 100%; text-align: left; border: 0; border-radius: 8px;
+          padding: 7px 8px; background: transparent; }
+  .item.sel { background: var(--sel); }
+  .item .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--open); }
+  .item.done .dot { background: var(--done); } .item.skipped .dot { background: var(--skip); }
+  .item small { color: var(--muted); display: block; }
+  #scan { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px; position: sticky; top: 70px;
+          max-height: calc(100vh - 100px); overflow: auto; }
+  #scan img { width: 100%; display: block; border-radius: 6px; cursor: zoom-in; }
+  #scan.zoom img { width: 190%; max-width: none; cursor: zoom-out; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 8px; }
+  .read { display: grid; grid-template-columns: 90px 1fr; gap: 4px 10px; }
+  .read dt { color: var(--muted); } .read dd { margin: 0; }
+  .tag { font-size: 12px; border-radius: 99px; padding: 1px 8px; margin-left: 6px; background: var(--good-bg); color: var(--done); }
+  .tag.low, .tag.unreadable { background: var(--warn-bg); color: var(--open); }
+  .note { background: var(--warn-bg); border-radius: 8px; padding: 8px 10px; margin-top: 8px; }
+  .issue { background: var(--warn-bg); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+  .ok { background: var(--good-bg); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+  .choice { display: block; width: 100%; text-align: left; margin-bottom: 6px; }
+  .choice.sel { border-color: var(--accent); background: var(--sel); }
+  .choice small { color: var(--muted); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 6px 0; }
+  .row > input { flex: 1; min-width: 120px; }
+  .hint { color: var(--muted); font-size: 13px; }
+  pre.summary { white-space: pre-wrap; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  #error { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #b3261e; color: #fff;
+           padding: 10px 16px; border-radius: 10px; display: none; max-width: 80vw; z-index: 10; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Reading Challenge review</h1>
+  <div class="counts" id="counts"></div>
+  <button id="finish" class="primary" disabled>Finish month</button>
+</header>
+<div id="error"></div>
+<div id="app"></div>
+<script>
+"use strict";
+const TOKEN = "__TOKEN__";
+let state = null, selected = null, onlyOpen = false, zoom = false;
+const $ = (id) => document.getElementById(id);
+
+function el(tag, attrs, ...kids) {              // text only: nothing read from handwriting is ever parsed as HTML
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (v === true) e.setAttribute(k, "");
+    else if (v !== false && v != null) e.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) e.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  return e;
+}
+function fail(msg) { const e = $("error"); e.textContent = msg; e.style.display = "block"; setTimeout(() => e.style.display = "none", 6000); }
+async function api(path, body) {
+  const res = await fetch(path + (path.includes("?") ? "&" : "?") + "t=" + TOKEN, body === undefined ? {} :
+    { method: "POST", headers: { "X-Token": TOKEN, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+async function load() { try { state = await api("/api/state"); render(); } catch (e) { fail(e.message); } }
+async function decide(key, decision) {
+  try { state = await api("/api/decision", { key, decision }); render(); } catch (e) { fail(e.message); }
+}
+const current = () => state.sheets.find((s) => s.key === selected);
+const set = (patch, drop = []) => {              // change this sheet's decision
+  const s = current(); const d = { ...s.decision, ...patch }; drop.forEach((k) => delete d[k]); return decide(s.key, d);
+};
+const fmt = (n) => (n == null ? "?" : Number(n).toLocaleString());
+
+function render() {
+  if (state.finished) return renderFinished();
+  $("title").textContent = "Review: " + state.month;
+  const c = state.counts;
+  $("counts").textContent = `${state.sheets.length} sheets: ${c.open} need you, ${c.done} settled, ${c.skipped} skipped. From ${state.source}.`;
+  $("finish").disabled = !state.ready;
+  if (!state.sheets.some((s) => s.key === selected)) {
+    const first = state.sheets.find((s) => s.status === "open") || state.sheets[0];
+    selected = first ? first.key : null;
+  }
+  const app = $("app"); app.replaceChildren(el("main", {}, renderList(), renderScan(), renderPanel()));
+}
+
+function renderList() {
+  const box = el("div", { id: "list" },
+    el("label", { class: "filter" }, el("input", { type: "checkbox", checked: onlyOpen, onchange: (e) => { onlyOpen = e.target.checked; render(); } }), " only sheets that need me"));
+  for (const s of state.sheets) {
+    if (onlyOpen && s.status !== "open" && s.key !== selected) continue;
+    box.append(el("button", { class: `item ${s.status} ${s.key === selected ? "sel" : ""}`, onclick: () => { selected = s.key; render(); } },
+      el("span", { class: "dot" }), el("span", {}, `p. ${s.page}  ${s.read.name || "(no name)"}`, el("small", {}, s.outcome || s.read.teacher || ""))));
+  }
+  return box;
+}
+
+function renderScan() {
+  const s = current();
+  if (!s) return el("div");
+  return el("div", { id: "scan", class: zoom ? "zoom" : "" },
+    el("img", { src: "/scan?key=" + encodeURIComponent(s.key) + "&t=" + TOKEN, alt: "Scanned sheet " + s.label, onclick: () => { zoom = !zoom; render(); } }));
+}
+
+function renderPanel() {
+  const s = current();
+  if (!s) return el("div", {}, "No sheets yet. Run extract first.");
+  const r = s.read, kinds = new Set(s.issues.map((i) => i.kind));
+  const tag = (lvl) => el("span", { class: "tag " + lvl }, lvl);
+  const panel = el("div", {});
+  const next = state.sheets.find((x) => x.status === "open" && x.key !== s.key && state.sheets.indexOf(x) > state.sheets.indexOf(s)) || state.sheets.find((x) => x.status === "open" && x.key !== s.key);
+  panel.append(el("div", { class: "row" }, el("button", { disabled: !next, onclick: () => { selected = next.key; render(); window.scrollTo(0, 0); } }, "Next sheet that needs me →")));
+  panel.append(el("div", { class: "card" }, el("h2", {}, s.label),
+    el("dl", { class: "read" },
+      el("dt", {}, "Name"), el("dd", {}, r.name || "(none)", tag(r.confidence)),
+      el("dt", {}, "Teacher"), el("dd", {}, r.teacher || "(none)"),
+      el("dt", {}, "Month"), el("dd", {}, r.month || "(none)"),
+      el("dt", {}, "Pages"), el("dd", {}, fmt(r.pages), tag(r.pages_confidence))),
+    r.note ? el("div", { class: "note" }, r.note) : null));
+  if (s.status === "open") for (const i of s.issues) panel.append(el("div", { class: "issue" }, i.message));
+  else panel.append(el("div", { class: "ok" }, s.status === "skipped" ? "Skipped: " + s.outcome : "Settled: " + s.outcome));
+  panel.append(whoCard(s), pagesCard(s, kinds));
+  if (kinds.has("teacher") || s.decision.teacher) panel.append(teacherCard(s));
+  if (kinds.has("month") || s.decision.month_ok) panel.append(monthCard(s));
+  if (kinds.has("duplicate") || s.decision.duplicate) panel.append(duplicateCard(s));
+  return panel;
+}
+
+function whoCard(s) {
+  const d = s.decision, card = el("div", { class: "card" }, el("h2", {}, "Who is this?"));
+  const pick = (id) => set({ student: id, remember_name: rememberBox && rememberBox.checked }, ["new_student", "skip"]);
+  const remember = el("label", { class: "hint" });
+  var rememberBox = el("input", { type: "checkbox", checked: d.remember_name !== false && !!s.read.name,
+    onchange: () => d.student && pick(d.student) });
+  remember.append(rememberBox, ` remember "${s.read.name}" as another name for this child`);
+  const button = (c) => el("button", { class: "choice" + (d.student === c.id ? " sel" : ""), onclick: () => pick(c.id) },
+    `${c.name}`, el("small", {}, `  ${c.teacher || "no teacher"}${c.grade ? ", grade " + c.grade : ""} · ${fmt(c.total)} pages · ${c.reason}${c.from_hints ? " (last year)" : ""}`));
+  const fromList = s.candidates.filter((c) => !c.from_hints), hints = s.candidates.filter((c) => c.from_hints);
+  for (const c of fromList) card.append(button(c));
+  if (!fromList.length) card.append(el("div", { class: "hint" }, "No one on the roster looks like this."));
+  for (const c of hints) card.append(el("div", { class: "hint" }, `Last year: ${c.name} (${c.teacher}, grade ${c.grade || "?"}) - add as new below`));
+  // search the whole roster (nicknames, misspellings)
+  const results = el("div", {});
+  const search = el("input", { type: "search", placeholder: "Search the roster by any part of a name…", oninput: () => {
+    const q = search.value.trim().toLowerCase(); results.replaceChildren();
+    if (q.length < 2) return;
+    for (const p of state.roster.filter((p) => (p.name + " " + p.nicknames).toLowerCase().includes(q)).slice(0, 8))
+      results.append(button({ ...p, reason: "found by search", from_hints: false }));
+  } });
+  card.append(el("div", { class: "row" }, search), results);
+  if (s.read.name && d.student) card.append(remember);
+  card.append(newStudentForm(s), skipForm(s));
+  return card;
+}
+
+function newStudentForm(s) {
+  const n = s.decision.new_student || {}, teachers = state.teachers;
+  const name = el("input", { value: n.name || s.read.name, placeholder: "Full name" });
+  const teacherSel = el("select", {}, el("option", { value: "" }, "Teacher…"),
+    teachers.map((t) => el("option", { value: t, selected: t === (n.teacher || s.teacher_guess) }, t)), el("option", { value: "__other" }, "Someone else…"));
+  const teacherTxt = el("input", { placeholder: "Teacher's name", style: "display:none" });
+  teacherSel.addEventListener("change", () => teacherTxt.style.display = teacherSel.value === "__other" ? "" : "none");
+  const grade = el("input", { value: n.grade || "", placeholder: "Grade", size: 4 });
+  const total = el("input", { value: n.total || "", placeholder: "pages before this month (if any)", type: "number", min: 0 });
+  const oneWord = el("div", { class: "hint", id: "oneword" }, "Only a first name: the certificate will print just this. Add the last name if you can find it.");
+  const syncOne = () => oneWord.style.display = name.value.trim().includes(" ") || !name.value.trim() ? "none" : "";
+  name.addEventListener("input", syncOne); syncOne();
+  const teacherGuess = s.read.teacher && !n.teacher ? el("div", { class: "hint" }, `The sheet says teacher: ${s.read.teacher}${s.teacher_guess ? ` (chosen: ${s.teacher_guess}; change it if wrong)` : ""}`) : null;
+  const save = () => {
+    const t = teacherSel.value === "__other" ? teacherTxt.value.trim() : teacherSel.value;
+    if (!name.value.trim()) return fail("Type the child's name first.");
+    set({ new_student: { name: name.value.trim(), teacher: t, grade: grade.value.trim(), total: Number(total.value || 0) } }, ["student", "remember_name", "skip"]);
+  };
+  return el("details", { open: !!s.decision.new_student, style: "margin-top:10px" }, el("summary", {}, "Add as a new student"),
+    el("div", { class: "row" }, name), oneWord, teacherGuess, el("div", { class: "row" }, teacherSel, teacherTxt, grade), el("div", { class: "row" }, total),
+    el("div", { class: "row" }, el("button", { class: "primary", onclick: save }, n.name ? "Update new student" : "Add new student"),
+      s.decision.new_student ? el("button", { onclick: () => set({}, ["new_student"]) }, "Remove") : null));
+}
+
+function skipForm(s) {
+  const why = el("input", { placeholder: "Why skip? (e.g. blank sheet)", value: typeof s.decision.skip === "string" ? s.decision.skip : "" });
+  return el("details", { open: !!s.decision.skip, style: "margin-top:10px" }, el("summary", {}, "Skip this sheet"),
+    el("div", { class: "row" }, why, el("button", { onclick: () => set({ skip: why.value.trim() || "skipped" }, ["student", "new_student", "remember_name"]) }, "Skip"),
+      s.decision.skip ? el("button", { onclick: () => set({}, ["skip"]) }, "Un-skip") : null));
+}
+
+function pagesCard(s, kinds) {
+  const r = s.read, d = s.decision;
+  const input = el("input", { type: "number", min: 0, value: d.pages != null ? d.pages : "", placeholder: "pages" });
+  const card = el("div", { class: "card" }, el("h2", {}, "Pages this month"),
+    el("div", {}, `Read: ${fmt(r.pages)}`, d.pages != null ? ` · using ${fmt(d.pages)}` : d.pages_ok ? " · confirmed" : ""));
+  const row = el("div", { class: "row" });
+  if (r.pages != null) row.append(el("button", { onclick: () => set({ pages_ok: true }, ["pages"]) }, `${fmt(r.pages)} is right`));
+  row.append(input, el("button", { onclick: () => input.value !== "" ? set({ pages: Number(input.value) }, ["pages_ok"]) : fail("Type the number of pages.") }, "Use this number"));
+  if (d.pages != null || d.pages_ok) row.append(el("button", { onclick: () => set({}, ["pages", "pages_ok"]) }, "Undo"));
+  card.append(row);
+  return card;
+}
+
+function teacherCard(s) {
+  const sel = el("select", {}, el("option", { value: "" }, "Teacher…"), state.teachers.map((t) => el("option", { value: t, selected: t === s.decision.teacher }, t)));
+  const other = el("input", { placeholder: "or type a teacher", value: state.teachers.includes(s.decision.teacher) ? "" : (s.decision.teacher || "") });
+  return el("div", { class: "card" }, el("h2", {}, "Teacher on file"), el("div", { class: "hint" }, "This child has no teacher yet. Look it up and enter it."),
+    el("div", { class: "row" }, sel, other, el("button", { class: "primary", onclick: () => { const t = other.value.trim() || sel.value; t ? set({ teacher: t }) : fail("Choose or type a teacher."); } }, "Save teacher")));
+}
+
+function monthCard(s) {
+  return el("div", { class: "card" }, el("h2", {}, "Month on the sheet"),
+    el("div", {}, `The sheet says "${s.read.month}" but this batch is ${state.month}.`),
+    el("div", { class: "row" }, s.decision.month_ok ? el("button", { onclick: () => set({}, ["month_ok"]) }, "Undo") :
+      el("button", { onclick: () => set({ month_ok: true }) }, `Count it for ${state.month}`),
+      el("button", { onclick: () => set({ skip: "wrong month" }, ["student", "new_student", "remember_name"]) }, "Skip: wrong month")));
+}
+
+function duplicateCard(s) {
+  const mk = (v, label) => el("button", { class: "choice" + (s.decision.duplicate === v ? " sel" : ""), onclick: () => set({ duplicate: v }) }, label);
+  return el("div", { class: "card" }, el("h2", {}, "Second sheet for this child"),
+    mk("sum", "Add the pages together"), mk("skip", "Skip this one (keep the first)"));
+}
+
+function renderFinished() {
+  $("title").textContent = "Finished: " + state.month; $("counts").textContent = ""; $("finish").style.display = "none";
+  $("app").replaceChildren(el("main", { style: "display:block;max-width:760px;margin:auto" },
+    el("div", { class: "ok" }, "Done. Files written:"),
+    el("ul", {}, Object.entries(state.files).map(([k, v]) => el("li", {}, `${k}: ${v}`))),
+    el("pre", { class: "summary" }, state.summary)));
+}
+
+$("finish").addEventListener("click", async () => {
+  if (!confirm("Finish " + state.month + "? This writes the certificates and the new checkpoint.")) return;
+  try { state = await api("/api/finish", {}); render(); } catch (e) { fail(e.message); }
+});
+load();
+</script>
+</body>
+</html>

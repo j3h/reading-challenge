@@ -60,6 +60,11 @@ class Student:
     total: int = 0
     status: str = ACTIVE
     notes: str = ""
+    nicknames: str = ""       # other names the child writes, separated by commas ("Rozzie, Roz")
+
+    @property
+    def nickname_list(self) -> list[str]:
+        return [n.strip() for n in self.nicknames.split(",") if n.strip()]
 
 
 @dataclass(frozen=True)
@@ -213,6 +218,7 @@ def not_seen(cp: Checkpoint, results: list[Result]) -> list[Student]:
 
 # --------------------------------------------------------------------------- xlsx
 STUDENT_COLS = ["ID", "Name", "Teacher", "Grade", "Total pages", "Status", "Notes"]
+OPTIONAL_STUDENT_COLS = ["Also called"]     # older checkpoints do not have it
 HISTORY_COLS = ["Month", "ID", "Pages", "Total after", "Source"]
 
 
@@ -228,9 +234,9 @@ def save(cp: Checkpoint, path, results: list[Result] | None = None, table=None) 
     wb = Workbook()
     ws = wb.active
     ws.title = "Students"
-    ws.append(STUDENT_COLS)
+    ws.append(STUDENT_COLS + OPTIONAL_STUDENT_COLS)
     for s in sorted(cp.students.values(), key=lambda s: (s.teacher.lower(), s.name.lower())):
-        ws.append([s.id, s.name, s.teacher, s.grade, s.total, s.status, s.notes])
+        ws.append([s.id, s.name, s.teacher, s.grade, s.total, s.status, s.notes, s.nicknames])
 
     lm = wb.create_sheet("Last month")
     lm.append(["Month", "Teacher", "Name", "Pages this month", "Total pages", "Prizes given", "Source"])
@@ -249,7 +255,7 @@ def save(cp: Checkpoint, path, results: list[Result] | None = None, table=None) 
     meta.append(["month", cp.month or ""])
     meta.append(["note", "Edit Students freely (fix a name, teacher or total). Do not rename the sheets or columns."])
 
-    for sheet, widths in ((ws, [8, 26, 18, 8, 12, 9, 40]), (lm, [14, 18, 26, 14, 12, 50, 14]),
+    for sheet, widths in ((ws, [8, 26, 18, 8, 12, 9, 40, 24]), (lm, [14, 18, 26, 14, 12, 50, 14]),
                           (hs, [10, 8, 8, 12, 16]), (meta, [16, 70])):
         for c in sheet[1]:
             c.font = Font(bold=True)
@@ -263,7 +269,7 @@ def save(cp: Checkpoint, path, results: list[Result] | None = None, table=None) 
     wb.save(path)
 
 
-def _sheet_rows(wb, name, columns, path):
+def _sheet_rows(wb, name, columns, path, optional=()):
     if name not in wb.sheetnames:
         raise CheckpointError(f"{path}: no sheet called {name!r}")
     rows = list(wb[name].iter_rows(values_only=True))
@@ -271,11 +277,11 @@ def _sheet_rows(wb, name, columns, path):
     missing = [c for c in columns if c not in header]
     if missing:
         raise CheckpointError(f"{path}: sheet {name!r} is missing column(s) {', '.join(missing)}")
-    idx = {c: header.index(c) for c in columns}
+    idx = {c: header.index(c) for c in list(columns) + [o for o in optional if o in header]}
     for row in rows[1:]:
         if row is None or all(v is None or str(v).strip() == "" for v in row):
             continue
-        yield {c: row[i] if i < len(row) else None for c, i in idx.items()}
+        yield {**{o: None for o in optional}, **{c: row[i] if i < len(row) else None for c, i in idx.items()}}
 
 
 def _text(v) -> str:
@@ -290,7 +296,7 @@ def load(path) -> Checkpoint:
     cp = Checkpoint()
     for sheet, columns in (("Students", STUDENT_COLS), ("History", HISTORY_COLS)):
         _ = list(_sheet_rows(wb, sheet, columns, path))  # header check with a clear message
-    for r in _sheet_rows(wb, "Students", STUDENT_COLS, path):
+    for r in _sheet_rows(wb, "Students", STUDENT_COLS, path, OPTIONAL_STUDENT_COLS):
         sid = _text(r["ID"])
         if not sid:
             raise CheckpointError(f"{path}: a student row has no ID")
@@ -301,7 +307,7 @@ def load(path) -> Checkpoint:
         except ValueError:
             raise CheckpointError(f"{path}: {sid} has a total that is not a number") from None
         cp.students[sid] = Student(sid, _text(r["Name"]), _text(r["Teacher"]), _text(r["Grade"]), total,
-                                   _text(r["Status"]).lower() or ACTIVE, _text(r["Notes"]))
+                                   _text(r["Status"]).lower() or ACTIVE, _text(r["Notes"]), _text(r["Also called"]))
     for r in _sheet_rows(wb, "History", HISTORY_COLS, path):
         cp.history.append(HistoryRow(month_key(r["Month"]), _text(r["ID"]), to_int(r["Pages"] or 0),
                                      to_int(r["Total after"] or 0), _text(r["Source"])))

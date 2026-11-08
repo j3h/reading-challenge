@@ -3,7 +3,8 @@
   start    create the month's folders and say where to put the scans
   check    list every open question about the scanned sheets (exit status 1 if any)
   extract  read the scanned sheets with Claude (run as: op run --env-file=.env -- python -m rc ... extract)
-  decide   answer a question from the command line (until the review page exists)
+  review   open the review screen in your browser (scan beside each question)
+  decide   answer a question from the command line
   finish   write certificates.pdf, summary.txt and checkpoint.xlsx for the month
   import-master  one-time: master spreadsheet PDF -> starting checkpoint for a season
 
@@ -16,6 +17,7 @@ import sys
 from rc import checkpoint as ck
 from rc import extract
 from rc import import_master
+from rc import review_web
 from rc import runner
 from rc import workspace as wsp
 
@@ -80,6 +82,10 @@ def cmd_extract(args):
         print(f"Not reading sheets (blank or other pages), left out: {', '.join(dropped)}")
     print("Cost this run:", extract.cost_estimate(usage, args.model))
     print('Next: python -m rc --data <folder> check --month "%s"' % ck.month_label(m.folder.month))
+
+
+def cmd_review(args):
+    review_web.serve(_month(args), open_browser=not args.no_browser, port=args.port)
 
 
 def cmd_decide(args):
@@ -149,6 +155,11 @@ def main(argv=None):
     p.add_argument("--force", action="store_true", help="ask again even for pages already read")
     p.add_argument("--dry-run", action="store_true", help="render the pages and report sizes; no API calls")
     p.set_defaults(fn=cmd_extract)
+    p = sub.add_parser("review", help="open the review screen in your browser")
+    p.add_argument("--month", required=True)
+    p.add_argument("--port", type=int, default=0, help="fixed port (default: any free one)")
+    p.add_argument("--no-browser", action="store_true")
+    p.set_defaults(fn=cmd_review)
     p = sub.add_parser("decide")
     p.add_argument("--month", required=True)
     p.add_argument("sheet", help='sheet key as shown by check, e.g. "oct.pdf#12"')

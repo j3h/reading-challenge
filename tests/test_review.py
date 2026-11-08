@@ -200,3 +200,16 @@ def test_a_note_alone_does_not_block_a_confident_page_count(cp):
     records = [rec(1, "Ada Example", "Lopez", 158, note="rows add up to 140")]
     p = rv.plan(records, cp, "October 2026", {})
     assert p.ready and p.settled[0].pages == 158
+
+
+def test_remembering_a_written_name_makes_next_month_exact(cp):
+    records = [rec(1, "Ioli", "Park", 5)]
+    p = rv.plan(records, cp, "October 2026", {"oct.pdf#1": {"student": "S0003", "remember_name": True}})
+    assert p.ready
+    cp2, _, notes = rv.finalize(p, cp, TABLE)
+    assert cp2.students["S0003"].nicknames == "Ioli" and any("also be recognised as 'Ioli'" in n for n in notes)
+    assert "Ioli" not in cp.students["S0003"].nicknames                    # the input is untouched
+    assert rv.plan(records, cp2, "October 2026", {}).ready                   # exact now, no decision needed
+    same = rv.plan([rec(1, "Io Li", "Park", 5)], cp, "October 2026",
+                   {"oct.pdf#1": {"student": "S0003", "remember_name": True}})
+    assert rv.finalize(same, cp, TABLE)[0].students["S0003"].nicknames == ""   # the real name is not a nickname

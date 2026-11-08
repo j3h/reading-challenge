@@ -64,6 +64,17 @@ class Month:
         decisions.setdefault(key, {}).update(decision)
         rv.save_decisions(decisions, self.decisions_path)
 
+    def set_decision(self, key: str, decision: dict) -> None:
+        """Replace the whole decision for one sheet (an empty decision removes it) and save."""
+        if key not in {r.key for r in self.records()}:
+            raise ck.CheckpointError(f"no sheet {key!r}")
+        decisions = self.decisions()
+        if decision:
+            decisions[key] = decision
+        else:
+            decisions.pop(key, None)
+        rv.save_decisions(decisions, self.decisions_path)
+
     # ---- finishing
     def finish(self) -> str:
         """Write certificates.pdf, summary.txt and (last) checkpoint.xlsx. Returns the summary text."""

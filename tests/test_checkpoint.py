@@ -176,3 +176,16 @@ def test_load_reports_a_missing_column(cp, tmp_path):
     wb.save(path)
     with pytest.raises(ck.CheckpointError, match="missing column.*Teacher"):
         ck.load(path)
+
+
+def test_nicknames_round_trip_and_old_files_without_the_column_still_load(cp, tmp_path):
+    from openpyxl import load_workbook
+    cp.students["S0001"] = ck.replace(cp.students["S0001"], nicknames="Addie, Ada E")
+    path = tmp_path / "c.xlsx"
+    ck.save(cp, path)
+    assert ck.load(path).students["S0001"].nicknames == "Addie, Ada E"
+    assert ck.load(path).students["S0001"].nickname_list == ["Addie", "Ada E"]
+    wb = load_workbook(path)
+    wb["Students"].delete_cols(8)                      # an older checkpoint has no 'Also called' column
+    wb.save(path)
+    assert ck.load(path).students["S0001"].nicknames == ""
