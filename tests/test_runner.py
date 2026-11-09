@@ -51,7 +51,7 @@ CLEAN = [rec(1, "Ada Example", "Lopez", 30), rec(2, "Sam Sample", "Park", 5), re
 def test_start_creates_folders_and_says_where_scans_go(data, capsys):
     run("--data", str(data), "start", "--month", "October 2026")
     out = capsys.readouterr().out
-    assert "starting checkpoint for 2026-27" in out and "4 students" in out
+    assert "starting checkpoint in 2026-27/start" in out and "4 students" in out
     assert str(data / "2026-27" / "2026-10" / "scans") in out
 
 
@@ -135,22 +135,22 @@ def test_next_month_starts_from_this_months_checkpoint(data):
     assert len(new.history) == 4          # three from October, one from November
 
 
-def test_new_season_starts_empty_and_uses_last_year_as_hints(data):
+def test_totals_roll_forward_into_the_next_school_year(data):
     sheets(data, CLEAN)
     run("--data", str(data), "finish", "--month", "October 2026")
-    # July 2027 is the next season: no checkpoint, but last season's roster is offered as hints
-    sheets(data, [rv.SheetRecord("sep.pdf", 1, "Ada Example", "Park", "September 2027", 12)], "September 2027")
+    # September 2027 is in the next school-year folder, but starts from October 2026's checkpoint
+    mf = sheets(data, [rv.SheetRecord("sep.pdf", 1, "Ada Example", "Park", "September 2027", 12)], "September 2027")
+    assert mf.path == data / "2027-28" / "2027-09"
     m = runner.Month(wsp.Workspace(data), "September 2027")
     prev, why = m.previous()
-    assert prev.students == {} and "first month" in why
-    p = m.plan()
-    assert [i.kind for i in p.issues] == ["who"] and p.issues[0].candidates[0].from_hints
-    run("--data", str(data), "decide", "--month", "September 2027", "sep.pdf#1", "--new-name", "Ada Example",
-        "--teacher", "Park", "--grade", "3")
+    assert len(prev.students) == 4 and "October 2026" in why
+    p = m.plan()          # new teacher this year: a person confirms the class change
+    assert [i.kind for i in p.issues] == ["who"] and p.issues[0].candidates[0].student.name == "Ada Example"
+    run("--data", str(data), "decide", "--month", "September 2027", "sep.pdf#1", "--student", "S0001",
+        "--teacher", "Park")
     run("--data", str(data), "finish", "--month", "September 2027")
-    new = ck.load(m.folder.checkpoint)
-    ada = next(iter(new.students.values()))
-    assert (ada.total, ada.teacher) == (12, "Park")           # last year's 104 pages did not carry over
+    ada = ck.load(m.folder.checkpoint).students["S0001"]
+    assert (ada.total, ada.teacher) == (74 + 30 + 12, "Park")
 
 
 def test_nothing_to_do_when_every_sheet_is_skipped(data):

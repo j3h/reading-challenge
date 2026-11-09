@@ -130,13 +130,6 @@ def test_decision_naming_a_missing_student_is_caught(cp):
     assert kinds(p) == [("oct.pdf#1", "who")]
 
 
-def test_last_years_roster_is_offered_for_unknown_children(cp):
-    last_year = ck.Checkpoint()
-    ck.add_student(last_year, "Quentin Quimby", "Old Teacher", "1")
-    p = rv.plan([rec(1, "Quentin Quimby", "Park", 5)], cp, "October 2026", {}, hints=last_year)
-    assert p.issues[0].candidates[0].from_hints and "last year" in p.issues[0].message
-
-
 def test_decisions_and_records_survive_a_round_trip(tmp_path):
     decisions = {"oct.pdf#1": {"student": "S0001", "pages": 5}, "oct.pdf#2": {"skip": "blank"}}
     rv.save_decisions(decisions, tmp_path / "work" / "decisions.json")
@@ -225,9 +218,9 @@ def test_a_teacher_decision_records_a_class_change(cp):
     assert not any("teacher" in n for n in rv.finalize(same, cp, TABLE)[2])
 
 
-def sug(records, cp, decisions=None, hints=None):
+def sug(records, cp, decisions=None):
     decisions = decisions or {}
-    p = rv.plan(records, cp, "October 2026", decisions, hints)
+    p = rv.plan(records, cp, "October 2026", decisions)
     return rv.suggest(p, cp, decisions)
 
 
@@ -267,13 +260,6 @@ def test_suggestion_for_a_second_sheet(cp):
     assert sug(same, cp)["oct.pdf#2"].decision["duplicate"] == "skip"
     more = [rec(1, "Ada Example", "Lopez", 30), rec(2, "Ada Example", "Lopez", 20)]
     assert sug(more, cp)["oct.pdf#2"].decision["duplicate"] == "sum"
-
-
-def test_suggestion_uses_last_years_name_and_grade(cp):
-    last_year = ck.Checkpoint()
-    ck.add_student(last_year, "Quentin Quimby", "Old Teacher", "1")
-    s = sug([rec(1, "Quentin", "Park", 5)], cp, hints=last_year)["oct.pdf#1"]
-    assert s.decision["new_student"] == {"name": "Quentin Quimby", "teacher": "Park", "grade": "1"}
 
 
 def test_a_confident_match_on_a_hard_to_read_name_says_so(cp):

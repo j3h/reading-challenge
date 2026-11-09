@@ -7,8 +7,6 @@ status the review step acts on:
     exact      one student, name agrees (ignoring case, punctuation, accents). Used automatically.
     likely     one clearly best student. Pre-selected in review; a person confirms.
     ambiguous  several plausible students (two Andersons, first name only). A person chooses.
-    hint       nobody in the checkpoint, but last year's roster has a good match: offer to add them
-               as a new student with that teacher and grade (a person confirms).
     none       nobody plausible: add as a new student, or skip the sheet.
 
 Teacher agreement raises a score and a clear conflict lowers it, but teachers change between years and
@@ -23,7 +21,7 @@ from difflib import SequenceMatcher
 
 from rc import checkpoint as ck
 
-EXACT, LIKELY, AMBIGUOUS, HINT, NONE = "exact", "likely", "ambiguous", "hint", "none"
+EXACT, LIKELY, AMBIGUOUS, NONE = "exact", "likely", "ambiguous", "none"
 
 EXACT_SCORE = 0.97
 LIKELY_SCORE = 0.80
@@ -156,7 +154,6 @@ class Candidate:
     student: ck.Student
     score: float
     reason: str
-    from_hints: bool = False
 
 
 @dataclass(frozen=True)
@@ -173,7 +170,7 @@ def _same_name(c: "Candidate") -> bool:
     return c.reason.startswith(("same name", "same words"))
 
 
-def _score_pool(name, teacher, students, from_hints):
+def _score_pool(name, teacher, students):
     out = []
     for s in students:
         score, why = name_score(name, s.name, s.nickname_list)
@@ -185,15 +182,15 @@ def _score_pool(name, teacher, students, from_hints):
         elif agreement == "conflict":
             score, why = max(0.0, score - 0.15), why + ", different teacher"
         if score >= PLAUSIBLE_SCORE:
-            out.append(Candidate(s, round(score, 3), why, from_hints))
+            out.append(Candidate(s, round(score, 3), why))
     # a student whose whole name matches always outranks one that is merely similar ("Ida" / "Mia")
     return sorted(out, key=lambda c: (not _same_name(c), -c.score, c.student.name))
 
 
-def match(name: str, teacher: str, cp: ck.Checkpoint, hints: ck.Checkpoint | None = None) -> Match:
+def match(name: str, teacher: str, cp: ck.Checkpoint) -> Match:
     """Best students for a sheet. Students who have left are never offered."""
     pool = [s for s in cp.students.values() if s.status == ck.ACTIVE]
-    cands = _score_pool(name, teacher, pool, False)
+    cands = _score_pool(name, teacher, pool)
     if cands:
         same = [c for c in cands if _same_name(c)]
         if len(same) == 1:
@@ -206,8 +203,4 @@ def match(name: str, teacher: str, cp: ck.Checkpoint, hints: ck.Checkpoint | Non
         runner_up = cands[1].score if len(cands) > 1 else 0.0
         clear = top.score - runner_up >= CLEAR_MARGIN
         return Match(LIKELY if top.score >= LIKELY_SCORE and clear else AMBIGUOUS, tuple(cands))
-    if hints is not None:
-        hinted = _score_pool(name, teacher, list(hints.students.values()), True)
-        if hinted:
-            return Match(HINT, tuple(hinted))
     return Match(NONE, ())

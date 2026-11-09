@@ -86,18 +86,6 @@ def test_students_who_left_are_not_offered():
     assert mt.match("Ada Example", "Lopez", cp).status == mt.NONE
 
 
-def test_last_years_roster_is_offered_as_a_hint():
-    last_year = roster(("Quentin Quimby", "Moren"))
-    m = mt.match("Quentin Quimby", "Park", CP, hints=last_year)
-    assert m.status == mt.HINT and m.best.from_hints and m.best.student.teacher == "Moren"
-
-
-def test_current_roster_beats_the_hints():
-    last_year = roster(("Ada Example", "Old Teacher"))
-    m = mt.match("Ada Example", "Lopez", CP, hints=last_year)
-    assert m.status == mt.EXACT and not m.best.from_hints
-
-
 def test_candidates_are_sorted_best_first():
     m = mt.match("Anderson", "", roster(("Amelia Anderson", "A"), ("Ida Anderson", "B"), ("Anderson", "C")))
     scores = [c.score for c in m.candidates]

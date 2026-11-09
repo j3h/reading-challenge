@@ -4,7 +4,7 @@ The data folder is outside the git repo (it holds children's names), typically i
 Jamie can see it:
 
     <data folder>/
-      2026-27/                        one folder per school year ("season")
+      2026-27/                        one folder per school year, only to keep months tidy
         start/checkpoint.xlsx         optional: the very first checkpoint (e.g. imported master sheet)
         2026-10/                      one folder per month
           scans/                      the scanned sheets for that month (the original PDF)
@@ -13,11 +13,11 @@ Jamie can see it:
           certificates.pdf            the print file, by classroom
           summary.txt                 what changed, new students, anything flagged
         2026-11/ ...
-      2027-28/                        a new year starts with no checkpoint
+      2027-28/
+        2027-09/                      starts from 2027-28's last checkpoint: totals keep rolling forward
 
-A month's input checkpoint is the latest earlier month in the same season, else `start/`, else
-nothing (a fresh year). Last year's final checkpoint is offered separately as *hints* for matching
-names and teachers; its totals are never carried in.
+Totals never reset: a month's input checkpoint is the latest earlier finished month in ANY school year,
+else the most recent `start/` checkpoint, else nothing (the very first month).
 
 Files are written to a temporary name and renamed, so a sync client never uploads half a file.
 """
@@ -31,7 +31,7 @@ from pathlib import Path
 
 from rc import checkpoint as ck
 
-SEASON_START_MONTH = 7   # July: a season runs July..June
+SEASON_START_MONTH = 7   # July: a school-year folder runs July..June
 CHECKPOINT = "checkpoint.xlsx"
 CERTIFICATES = "certificates.pdf"
 SUMMARY = "summary.txt"
@@ -42,10 +42,6 @@ def season_for(month: str, start_month: int = SEASON_START_MONTH) -> str:
     year, mon = (int(p) for p in ck.month_key(month).split("-"))
     first = year if mon >= start_month else year - 1
     return f"{first}-{(first + 1) % 100:02d}"
-
-
-def _season_first_year(season: str) -> int:
-    return int(season.split("-")[0])
 
 
 @dataclass(frozen=True)
@@ -117,32 +113,24 @@ class Workspace:
         return p if p.exists() else None
 
     def previous_checkpoint(self, month: str, season: str | None = None) -> tuple[Path | None, str]:
-        """(path, description) of the checkpoint to start `month` from, or (None, why not)."""
-        mf = self.month_folder(month, season)
-        earlier = [m for m in self.finished_months(mf.season) if m < mf.month]
-        if earlier:
-            return self.root / mf.season / earlier[-1] / CHECKPOINT, f"checkpoint from {ck.month_label(earlier[-1])}"
-        later = [m for m in self.finished_months(mf.season) if m >= mf.month]
-        if later:
-            raise ck.CheckpointError(
-                f"{ck.month_label(mf.month)} is not newer than the already finished {ck.month_label(later[0])} "
-                f"in {mf.season}; use a later month, or move that folder aside to redo it")
-        start = self.start_checkpoint(mf.season)
-        if start:
-            return start, f"starting checkpoint for {mf.season}"
-        return None, f"no earlier checkpoint in {mf.season}: this is the first month"
+        """(path, description) of the checkpoint to start `month` from, or (None, why not).
 
-    def hints_checkpoint(self, month: str, season: str | None = None) -> Path | None:
-        """Last finished checkpoint of the most recent earlier season. For matching hints only."""
+        Looks across every school-year folder: totals roll forward from year to year."""
         mf = self.month_folder(month, season)
-        for s in reversed([s for s in self.seasons() if _season_first_year(s) < _season_first_year(mf.season)]):
-            months = self.finished_months(s)
-            if months:
-                return self.root / s / months[-1] / CHECKPOINT
-            start = self.start_checkpoint(s)
-            if start:
-                return start
-        return None
+        finished = sorted((m, s) for s in self.seasons() for m in self.finished_months(s))
+        later = [(m, s) for m, s in finished if m >= mf.month]
+        if later:
+            m, s = later[0]
+            raise ck.CheckpointError(
+                f"{ck.month_label(mf.month)} is not newer than the already finished {ck.month_label(m)} "
+                f"({s}/{m}); use a later month, or move that folder aside to redo it")
+        if finished:
+            m, s = finished[-1]
+            return self.root / s / m / CHECKPOINT, f"checkpoint from {ck.month_label(m)}"
+        starts = [s for s in self.seasons() if s <= mf.season and self.start_checkpoint(s)]
+        if starts:
+            return self.start_checkpoint(starts[-1]), f"starting checkpoint in {starts[-1]}/start"
+        return None, "no earlier checkpoint: this is the first month"
 
 
 def write_atomic(path, data: bytes | str) -> None:

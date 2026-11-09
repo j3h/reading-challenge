@@ -212,3 +212,22 @@ def test_snippets_of_the_scan_are_cut_where_each_value_was_read(month):
 def test_the_review_screen_is_the_table(server):
     base, token = server
     assert b"review (table)" in fetch(base + "/")[1]
+
+
+def test_finished_files_are_served_only_once_the_month_is_finished(server, month):
+    base, token = server
+    assert fetch(base + "/file/certificates.pdf?t=" + token)[0] == 404          # not finished yet
+    h = {"X-Token": token, "Content-Type": "application/json"}
+    fetch(base + "/api/decision", {"key": "scan.pdf#2", "decision": {"skip": "x"}}, h)
+    fetch(base + "/api/decision", {"key": "scan.pdf#3", "decision": {"skip": "x"}}, h)
+    assert fetch(base + "/api/finish", {}, h)[0] == 200
+    status, body, headers = fetch(base + "/file/certificates.pdf?t=" + token)
+    assert status == 200 and headers["Content-Type"] == "application/pdf" and body[:4] == b"%PDF"
+    status, body, headers = fetch(base + "/file/checkpoint.xlsx?t=" + token)
+    assert status == 200 and "attachment" in headers["Content-Disposition"] and body[:2] == b"PK"
+    assert fetch(base + "/file/summary.txt?t=" + token)[0] == 200
+    assert fetch(base + "/file/certificates.pdf")[0] == 403                       # still needs the token
+    for name in ("../checkpoint.xlsx", "work%2Fdecisions.json", "records.json"):
+        assert fetch(base + "/file/" + name + "?t=" + token)[0] == 404
+    status, body, _ = fetch(base + "/api/open", {"file": "../../etc/passwd"}, h)
+    assert status == 409

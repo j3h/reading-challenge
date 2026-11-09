@@ -34,10 +34,6 @@ class Month:
         path, why = self.ws.previous_checkpoint(self.folder.month, self.folder.season)
         return (ck.load(path) if path else ck.Checkpoint()), why
 
-    def hints(self) -> ck.Checkpoint | None:
-        path = self.ws.hints_checkpoint(self.folder.month, self.folder.season)
-        return ck.load(path) if path else None
-
     def records(self) -> list[rv.SheetRecord]:
         if not self.records_path.exists():
             raise ck.CheckpointError(f"no sheets have been read yet: {self.records_path} is missing "
@@ -52,7 +48,7 @@ class Month:
             raise ck.CheckpointError(f"{ck.month_label(self.folder.month)} is already finished "
                                      f"({self.folder.checkpoint})")
         cp, _ = self.previous()
-        return rv.plan(self.records(), cp, self.folder.month, self.decisions(), self.hints())
+        return rv.plan(self.records(), cp, self.folder.month, self.decisions())
 
     # ---- review
     def decide(self, key: str, **decision) -> None:
@@ -104,9 +100,7 @@ def describe_issues(p: rv.Plan) -> list[str]:
         lines.append(f"[{i.kind}] {i.message}")
         if i.kind == "who":
             for c in i.candidates[:3]:
-                src = " (last year)" if c.from_hints else ""
-                lines.append(f"      {c.student.id if not c.from_hints else '-'}  {c.student.name} / "
-                             f"{c.student.teacher} - {c.reason}{src}")
+                lines.append(f"      {c.student.id}  {c.student.name} / {c.student.teacher} - {c.reason}")
         elif i.kind == "teacher":
             lines.append("      teachers: " + ", ".join(i.candidates))
     return lines

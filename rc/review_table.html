@@ -4,35 +4,48 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Reading Challenge review (table)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Open+Sans:wght@400;600;700&display=swap">
 <style>
+  /* Colours and type from the BCS PTA Reading Challenge page (beverlyclearyschool.org/reading-challenge):
+     navy #233B77 bar, blue #246CBA / #008AC6 headings and links, teal #20B2A8 from the Reading Challenge badge,
+     Montserrat headings, Open Sans text. The fonts fall back to the system font when offline. */
   :root {
-    --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #e4e3dc; --row: #fbfaf7;
-    --accent: #3b2fc9; --accent-ink: #ffffff; --open: #c2570c; --auto: #19794a; --decided: #2f6fd6; --skip: #8a8a90;
-    --warn-bg: #fff4e5; --info-bg: #f0f0ec; --sel: #efeeff;
+    --navy: #233b77; --navy-ink: #ffffff; --teal: #20b2a8;
+    --bg: #f4f7fb; --panel: #ffffff; --ink: #1f2937; --muted: #5a5a5a; --line: #dce3ee; --row: #f7f9fc;
+    --accent: #246cba; --accent-ink: #ffffff; --link: #008ac6; --open: #c2570c; --auto: #17917f; --decided: #246cba; --skip: #8a8a90;
+    --warn-bg: #fff4e5; --info-bg: #eef3f9; --sel: #e6f1fa;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #17171a; --panel: #222226; --ink: #ededf0; --muted: #a0a0a8; --line: #34343a; --row: #26262b;
-            --accent: #8f87ff; --accent-ink: #12121a; --open: #f0a05a; --auto: #5fcf94; --decided: #7aa7ff; --skip: #8a8a92;
-            --warn-bg: #3a2c1c; --info-bg: #2b2b30; --sel: #2d2b52; }
+    :root { --navy: #1a2c5a; --navy-ink: #ffffff; --teal: #3cc7bc;
+            --bg: #121722; --panel: #1b2230; --ink: #e8edf5; --muted: #a3adbd; --line: #2e384a; --row: #202838;
+            --accent: #5b9be0; --accent-ink: #0d1420; --link: #4fb6e6; --open: #f0a05a; --auto: #4fd1c0; --decided: #7cb1ee; --skip: #8a8a92;
+            --warn-bg: #3a2c1c; --info-bg: #222c3d; --sel: #1d3350; }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 "Open Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  h1, h2, th, button, .st, .counts { font-family: Montserrat, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   button, select, input { font: inherit; color: inherit; }
-  button { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 5px 11px; cursor: pointer; }
+  button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; font-weight: 600; font-size: 13px; }
   button:hover:not(:disabled) { border-color: var(--accent); }
   button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
   button:disabled { opacity: .45; cursor: not-allowed; }
   input, select { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; min-width: 0; }
-  a { color: var(--accent); }
-  header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line);
+  a { color: var(--link); }
+  header { position: sticky; top: 0; z-index: 5; background: var(--navy); color: var(--navy-ink); border-bottom: 4px solid var(--teal);
            padding: 10px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-  header h1 { font-size: 16px; margin: 0; }
-  header .counts { flex: 1; color: var(--muted); }
+  header .badge { font: 700 11px Montserrat, sans-serif; letter-spacing: .08em; text-transform: uppercase; background: var(--teal);
+                  color: #fff; border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
+  header h1 { font-size: 18px; font-weight: 600; margin: 0; }
+  header .counts { flex: 1; color: rgba(255,255,255,.8); font-size: 13px; }
+  header button { background: transparent; color: var(--navy-ink); border-color: rgba(255,255,255,.45); }
+  header button:hover:not(:disabled) { border-color: #fff; background: rgba(255,255,255,.1); }
+  header button.primary { background: var(--teal); border-color: var(--teal); color: #fff; }
+  header button.primary:hover:not(:disabled) { background: var(--teal); filter: brightness(1.08); }
   .bar { display: flex; gap: 14px; align-items: center; padding: 8px 16px; color: var(--muted); font-size: 13px; flex-wrap: wrap; }
   kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
   .wrap { padding: 0 16px 40px; }
   table { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-  th { text-align: left; font-weight: 600; font-size: 12px; color: var(--muted); padding: 7px 10px; border-bottom: 1px solid var(--line); background: var(--row); }
+  th { text-align: left; font-weight: 600; font-size: 12px; color: var(--accent); padding: 8px 10px; border-bottom: 2px solid var(--line); background: var(--row); text-transform: uppercase; letter-spacing: .04em; }
   td { padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
   tr.row { cursor: pointer; }
   tr.row:hover td { background: var(--row); }
@@ -70,6 +83,10 @@
   .ctl u { text-decoration-thickness: 2px; text-underline-offset: 2px; }
   tr.sheet td { background: var(--sel); padding: 0 10px 14px; }
   tr.sheet img { display: block; width: 100%; max-width: 900px; margin: 0 auto; border: 1px solid var(--line); border-radius: 8px; }
+  .files { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 16px; margin: 12px 0; }
+  .files h2 { font-size: 18px; font-weight: 600; color: var(--link); margin: 10px 0 4px; }
+  .file { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 9px 0; border-top: 1px solid var(--line); }
+  .file a { font-weight: 600; }
   pre.summary { white-space: pre-wrap; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
   #error { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #b3261e; color: #fff;
            padding: 10px 16px; border-radius: 10px; display: none; max-width: 80vw; z-index: 10; }
@@ -77,6 +94,7 @@
 </head>
 <body>
 <header>
+  <span class="badge">BCS PTA</span>
   <h1 id="title">Reading Challenge review</h1>
   <div class="counts" id="counts"></div>
   <button id="acceptAll"></button>
@@ -228,7 +246,7 @@ function openRow(s) {
       el("td"), el("td"), el("td"), checkCell);
   }
   // student
-  const cands = s.candidates.filter((c) => !c.from_hints);
+  const cands = s.candidates;
   const who = el("select", { onchange: (e) => {
     const v = e.target.value;
     if (v === "__new") f.mode = "new";
@@ -301,8 +319,22 @@ function accept() {
 function renderFinished() {
   $("title").textContent = "Finished: " + state.month; $("counts").textContent = "";
   $("finish").style.display = $("acceptAll").style.display = "none";
-  $("app").replaceChildren(el("div", { class: "box info" }, "Done. Files written:"),
-    el("ul", {}, Object.entries(state.files).map(([k, v]) => el("li", {}, `${k}: ${v}`))), el("pre", { class: "summary" }, state.summary));
+  document.querySelector(".bar").style.display = "none";
+  const open = (file) => api("/api/open", { file }).catch((e) => fail(e.message));
+  const what = { certificates: "Print file, by classroom", checkpoint: "Students and totals (next month starts here)",
+                 summary: "What changed this month" };
+  const rows = Object.entries(state.files).map(([k, path]) => {
+    const name = path.split("/").pop();
+    return el("div", { class: "file" },
+      el("div", {}, el("a", { href: `/file/${encodeURIComponent(name)}?t=${TOKEN}`, target: "_blank", rel: "noopener" }, name),
+        el("div", { class: "hint" }, what[k] || "")),
+      el("button", { onclick: () => open(name) }, k === "checkpoint" ? "Open in spreadsheet app" : "Open in app"));
+  });
+  $("app").replaceChildren(
+    el("div", { class: "files" }, el("h2", {}, "This month's files"), ...rows,
+      el("div", { class: "file" }, el("div", { class: "hint" }, state.files.certificates.split("/").slice(0, -1).join("/")),
+        el("button", { onclick: () => open("folder") }, "Show folder in Finder"))),
+    el("pre", { class: "summary" }, state.summary));
 }
 
 $("onlyOpen").addEventListener("change", (e) => { onlyOpen = e.target.checked; render(); });

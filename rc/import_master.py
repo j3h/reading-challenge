@@ -105,7 +105,7 @@ def parse_master(pdf_path, teacher_aliases=None):
             except ValueError:
                 raise ImportProblem(f"{name!r} has a total I cannot read: {total_text!r}") from None
             s = ck.Student(ck.next_id(cp), name, teacher, grade, total,
-                           notes="teacher/grade were in red in the master" if was_red else "")
+                           notes="red in the master: no recent sheets turned in" if was_red else "")
             cp.students[s.id] = s
             if not total_text:
                 report.append(f"{name}: no previous total in the master; imported as 0")
@@ -124,17 +124,12 @@ def parse_master(pdf_path, teacher_aliases=None):
 
 def questions_for_staff(cp, report) -> str:
     """A plain-text list to take to whoever keeps the master sheet (names are real: keep it out of git)."""
-    red = [s for s in cp.students.values() if "red" in s.notes]
     none = [s for s in cp.students.values() if not s.teacher]
     teachers = Counter(s.teacher for s in cp.students.values() if s.teacher)
     out = ["Questions about the master sheet", "=" * 32, ""]
-    out += [f"1. {len(red)} students have their teacher/grade in red. What does red mean (e.g. last year's class, "
-            f"or total out of date)?"]
-    out += [f"     {s.name} - {s.teacher or '(no teacher)'} - grade {s.grade or '?'} - {s.total:,} pages" for s in
-            sorted(red, key=lambda s: s.name)]
-    out += ["", f"2. {len(none)} students have no teacher. Who are their teachers this year (or have they left)?"]
+    out += [f"1. {len(none)} students have no teacher. Who are their teachers this year (or have they left)?"]
     out += [f"     {s.name} - grade {s.grade or '?'}" for s in sorted(none, key=lambda s: s.name)]
-    out += ["", "3. Teacher names as they appear (should any be merged?):",
+    out += ["", "2. Teacher names as they appear (should any be merged?):",
             "     " + ", ".join(f"{t} ({n})" for t, n in sorted(teachers.items()))]
     return "\n".join(out) + "\n"
 

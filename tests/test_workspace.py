@@ -1,4 +1,4 @@
-"""Folders on disk: seasons, months, previous checkpoint, last year's hints, safe writes."""
+"""Folders on disk: school years, months, previous checkpoint (rolling forward), safe writes."""
 import sys
 from pathlib import Path
 
@@ -60,10 +60,24 @@ def test_first_month_uses_the_start_checkpoint(tmp_path):
     assert path == start / "checkpoint.xlsx" and "starting checkpoint" in why
 
 
-def test_new_year_starts_with_no_checkpoint_even_if_last_year_exists(tmp_path):
-    finish(tmp_path, "2025-26", "2026-05")
+def test_nothing_at_all_means_the_first_month(tmp_path):
     path, why = ws.Workspace(tmp_path).previous_checkpoint("2026-10")
     assert path is None and "first month" in why
+
+
+def test_totals_roll_forward_into_a_new_school_year(tmp_path):
+    finish(tmp_path, "2025-26", "2026-04")
+    may = finish(tmp_path, "2025-26", "2026-05")
+    path, why = ws.Workspace(tmp_path).previous_checkpoint("2026-10")
+    assert path == may and "May 2026" in why
+
+
+def test_a_finished_month_beats_an_older_start_checkpoint(tmp_path):
+    start = tmp_path / "2025-26" / "start"
+    start.mkdir(parents=True)
+    ck.save(ck.Checkpoint(), start / "checkpoint.xlsx")
+    may = finish(tmp_path, "2025-26", "2026-05")
+    assert ws.Workspace(tmp_path).previous_checkpoint("2026-10")[0] == may
 
 
 def test_rerunning_a_finished_or_older_month_is_refused(tmp_path):
@@ -71,22 +85,8 @@ def test_rerunning_a_finished_or_older_month_is_refused(tmp_path):
     for month in ("2026-11", "2026-10"):
         with pytest.raises(ck.CheckpointError, match="not newer"):
             ws.Workspace(tmp_path).previous_checkpoint(month)
-
-
-def test_hints_come_from_the_end_of_the_previous_season(tmp_path):
-    finish(tmp_path, "2025-26", "2026-04")
-    last = finish(tmp_path, "2025-26", "2026-05")
-    finish(tmp_path, "2026-27", "2026-10")                  # current season is never its own hints
-    assert ws.Workspace(tmp_path).hints_checkpoint("2026-11") == last
-
-
-def test_hints_fall_back_to_a_start_checkpoint_and_to_none(tmp_path):
-    w = ws.Workspace(tmp_path)
-    assert w.hints_checkpoint("2026-10") is None
-    start = tmp_path / "2025-26" / "start"
-    start.mkdir(parents=True)
-    ck.save(ck.Checkpoint(), start / "checkpoint.xlsx")
-    assert w.hints_checkpoint("2026-10") == start / "checkpoint.xlsx"
+    with pytest.raises(ck.CheckpointError, match="not newer"):      # even from last school year's folder
+        ws.Workspace(tmp_path).previous_checkpoint("2026-05")
 
 
 def test_write_atomic_leaves_no_temp_files(tmp_path):

@@ -219,6 +219,8 @@ def extract_month(client, month_folder: wsp.MonthFolder, model: str = DEFAULT_MO
     raw_dir.mkdir(parents=True, exist_ok=True)
 
     jobs = [(f.name, n, jpeg) for f in files for n, jpeg in render_pages(f, pages, dpi)]
+    todo = sum(1 for f, n, _ in jobs if force or not raw_path(raw_dir, f, n).exists())
+    log(f"{len(jobs)} page(s); {len(jobs) - todo} already read, sending {todo} ({workers} at a time)")
 
     def run(job):
         file, n, jpeg = job
@@ -277,6 +279,10 @@ def cost_estimate(usage: dict, model: str) -> str:
             f"= about ${dollars:.2f} for {usage['pages_sent']} page(s) sent")
 
 
+REQUEST_TIMEOUT = 60.0    # seconds per request; pages take ~7s (the SDK default is 10 minutes)
+
+
 def make_client():
     import anthropic
-    return anthropic.Anthropic(max_retries=4)
+    # a page normally takes well under a minute; a request that hangs is dropped and retried
+    return anthropic.Anthropic(max_retries=4, timeout=REQUEST_TIMEOUT)

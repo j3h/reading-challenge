@@ -125,7 +125,7 @@ def test_report_flags_what_needs_a_person(master):
 
 def test_red_text_is_kept_as_a_note(master):
     cp, _ = im.parse_master(master)
-    assert "red" in by_name(cp)["Io Li"].notes and by_name(cp)["Ada Example"].notes == ""
+    assert "no recent sheets" in by_name(cp)["Io Li"].notes and by_name(cp)["Ada Example"].notes == ""
 
 
 def test_a_child_without_a_teacher_cannot_get_a_certificate_until_fixed(master):
@@ -158,10 +158,9 @@ def test_cli_writes_a_checkpoint_and_prints_a_summary(master, tmp_path, capsys):
     assert out.exists()
 
 
-def test_questions_for_staff_lists_red_rows_and_missing_teachers(master, tmp_path):
+def test_questions_for_staff_lists_missing_teachers(master, tmp_path):
     cp, report = im.parse_master(master)
     text = im.questions_for_staff(cp, report)
-    assert "Io Li - Biello/Tanner - grade K - 74 pages" in text       # the red row
     assert "Sam Sample - grade 4" in text                              # no teacher
     out = tmp_path / "q.txt"
     im.main([str(master), "--out", str(tmp_path / "s.xlsx"), "--questions", str(out)])

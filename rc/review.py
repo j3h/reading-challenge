@@ -3,7 +3,7 @@
 Inputs
   records    what extraction read from each sheet (SheetRecord), one per scanned sheet
   decisions  what the person decided, saved as work/decisions.json so a review can stop and resume
-  checkpoint last month's students (plus optional hints from last year)
+  checkpoint last month's students (totals roll forward from year to year)
 
 `plan()` is pure: it shows what is settled and what still needs a person (Issue). `finalize()` only
 works when nothing is open; it adds any new students (each with a teacher) and returns the entries to
@@ -168,8 +168,7 @@ def _identity(s: Settled, cp: ck.Checkpoint) -> str:
     return "new:" + mt.normalize(n["name"]) + "|" + mt.normalize(n.get("teacher", ""))
 
 
-def plan(records: list[SheetRecord], cp: ck.Checkpoint, batch_month: str, decisions: dict,
-         hints: ck.Checkpoint | None = None) -> Plan:
+def plan(records: list[SheetRecord], cp: ck.Checkpoint, batch_month: str, decisions: dict) -> Plan:
     batch = ck.month_key(batch_month)
     settled, issues, matches = [], [], {}
     teachers = sorted({s.teacher for s in cp.students.values() if s.teacher})
@@ -182,7 +181,7 @@ def plan(records: list[SheetRecord], cp: ck.Checkpoint, batch_month: str, decisi
         item = Settled(rec)
 
         # who is this?
-        m = mt.match(rec.name, rec.teacher, cp, hints)
+        m = mt.match(rec.name, rec.teacher, cp)
         matches[rec.key] = m
         if "student" in d:
             if d["student"] not in cp.students:
@@ -206,7 +205,7 @@ def plan(records: list[SheetRecord], cp: ck.Checkpoint, batch_month: str, decisi
             item.student_id = m.best.student.id
         else:
             why = {mt.EXACT: "name read with low confidence", mt.LIKELY: "probably", mt.AMBIGUOUS: "could be several",
-                   mt.HINT: "not on this year's roster (was on last year's)", mt.NONE: "no one by that name"}[m.status]
+                   mt.NONE: "no one by that name"}[m.status]
             issues.append(Issue(rec.key, "who", f"{rec.label}: {rec.name or '(no name)'} / {rec.teacher or '(no teacher)'}"
                                                 f" - {why}", m.candidates))
 
@@ -341,18 +340,16 @@ def suggest(p: Plan, cp: ck.Checkpoint, decisions: dict) -> dict[str, Suggestion
         kinds = {i.kind for i in issues}
         if "student" in d or "new_student" in d:
             pass                                     # the person already chose who; keep it
-        elif m and m.candidates and not m.candidates[0].from_hints:
+        elif m and m.candidates:
             best = m.candidates[0]
             d["student"] = best.student.id
             d["remember_name"] = not best.reason.startswith(("same name", "same words"))
-            others = [c for c in m.candidates[1:] if not c.from_hints and c.score >= best.score - 0.1]
+            others = [c for c in m.candidates[1:] if c.score >= best.score - 0.1]
             why = "name hard to read" if m.status == mt.EXACT else best.reason
             reasons.append(why + (f"; could also be {others[0].student.name}" if others else ""))
         else:
-            hint = m.candidates[0].student if m and m.candidates else None
-            d["new_student"] = {"name": hint.name if hint else rec.name, "teacher": guess,
-                                "grade": hint.grade if hint else ""}
-            reasons.append("on last year's roster: add as new" if hint else "not on the roster: add as a new student")
+            d["new_student"] = {"name": rec.name, "teacher": guess, "grade": ""}
+            reasons.append("not on the roster: add as a new student")
             if not guess:
                 complete = False
                 reasons.append(f"choose a teacher (sheet says {rec.teacher!r})" if rec.teacher else "choose a teacher")

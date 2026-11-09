@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 import secrets
+import subprocess
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -110,7 +112,7 @@ class ReviewApp:
     def _cand(c) -> dict:
         s = c.student
         return {"id": s.id, "name": s.name, "teacher": s.teacher, "grade": s.grade, "score": c.score,
-                "reason": c.reason, "from_hints": c.from_hints, "total": s.total}
+                "reason": c.reason, "total": s.total}
 
     @staticmethod
     def _outcome(item, cp) -> str:
@@ -149,6 +151,24 @@ class ReviewApp:
         with self._lock:
             self.month.finish()
         return self.state()
+
+    # the month's finished files, by the name the page uses: (path, content type)
+    def output(self, name: str) -> tuple[Path, str]:
+        f = self.month.folder
+        files = {"certificates.pdf": (f.certificates, "application/pdf"),
+                 "summary.txt": (f.summary, "text/plain; charset=utf-8"),
+                 "checkpoint.xlsx": (f.checkpoint,
+                                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        if name not in files or not f.is_finished():
+            raise KeyError(name)
+        return files[name]
+
+    def open_locally(self, name: str) -> None:
+        """Open a finished file in its usual app (Preview, Numbers/Excel), or the month's folder in Finder."""
+        if sys.platform != "darwin":
+            raise ck.CheckpointError("opening files in their app only works on a Mac; use the links instead")
+        path = self.month.folder.path if name == "folder" else self.output(name)[0]
+        subprocess.run(["open", str(path)], check=True)
 
     def scan_crop(self, key: str, field: str) -> bytes:
         """A snippet of the scan around where `field` was read, so it can sit next to the value on screen."""
@@ -206,13 +226,17 @@ def make_server(app: ReviewApp, port: int = 0) -> tuple[ThreadingHTTPServer, str
             host = (self.headers.get("Host") or "").split(":")[0]
             return host in ("127.0.0.1", "localhost")
 
-        def _send(self, code: int, body: bytes, ctype: str = "application/json"):
+        def _send(self, code: int, body: bytes, ctype: str = "application/json", download: str | None = None):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
+            if download:
+                self.send_header("Content-Disposition", f'attachment; filename="{download}"')
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Content-Security-Policy", "default-src 'self' 'unsafe-inline'; img-src 'self' data:")
+            self.send_header("Content-Security-Policy", ("default-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+                                                                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                                                                "font-src https://fonts.gstatic.com"))
             self.end_headers()
             self.wfile.write(body)
 
@@ -241,8 +265,12 @@ def make_server(app: ReviewApp, port: int = 0) -> tuple[ThreadingHTTPServer, str
                     return self._send(200, app.scan_crop(query["key"][0], query["field"][0]), "image/jpeg")
                 if url.path == "/scan":
                     return self._send(200, app.scan_image(query["key"][0]), "image/jpeg")
+                if url.path.startswith("/file/"):
+                    path, ctype = app.output(url.path[len("/file/"):])
+                    return self._send(200, path.read_bytes(), ctype,
+                                      download=None if ctype.startswith(("application/pdf", "text/")) else path.name)
             except KeyError:
-                return self._json(404, {"error": "no such sheet"})
+                return self._json(404, {"error": "no such sheet or file"})
             except ck.CheckpointError as e:
                 return self._json(409, {"error": str(e)})
             self._json(404, {"error": "not found"})
@@ -260,7 +288,10 @@ def make_server(app: ReviewApp, port: int = 0) -> tuple[ThreadingHTTPServer, str
                     return self._json(200, app.accept_all())
                 if url.path == "/api/finish":
                     return self._json(200, app.finish())
-            except (ck.CheckpointError, KeyError, ValueError) as e:
+                if url.path == "/api/open":
+                    app.open_locally(str(body.get("file", "")))
+                    return self._json(200, {"ok": True})
+            except (ck.CheckpointError, KeyError, ValueError, OSError, subprocess.CalledProcessError) as e:
                 return self._json(409, {"error": str(e)})
             self._json(404, {"error": "not found"})
 

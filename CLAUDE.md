@@ -71,11 +71,11 @@ except extraction (OCR), the review UI and the one-command runner.
 - `rc/render.py`      print PDF: per teacher a cover page (prize tally + bagging checklist), then that
   class's certificates (drawn by `make_certificates.draw_certificate`, unchanged). Letter landscape.
 - `rc/import_master.py` one-time: master spreadsheet printed to PDF -> first checkpoint (name, teacher, grade,
-  previous total). The prize "x" columns are deliberately ignored. `--teacher-alias OLD=NEW` merges classes.
-- `rc/workspace.py`   data folder (outside git, e.g. iCloud Drive): `<season>/<month>/{scans,work,
-  checkpoint.xlsx,certificates.pdf,summary.txt}`. **Totals reset every school year (July-June)**; a new
-  season starts with no checkpoint, and last season's final one is used only as name/teacher hints.
-- `rc/matching.py`    sheet name + teacher -> student: exact / likely / ambiguous / hint / none.
+  previous total). The prize "x" columns are deliberately ignored; red rows (no recent sheets) are only noted. `--teacher-alias OLD=NEW` merges classes.
+- `rc/workspace.py`   data folder (outside git, e.g. iCloud Drive): `<school year>/<month>/{scans,work,
+  checkpoint.xlsx,certificates.pdf,summary.txt}`. **Totals never reset**: a month starts from the latest finished
+  month in any school-year folder (year folders only keep things tidy), else the latest `<year>/start/` checkpoint.
+- `rc/matching.py`    sheet name + teacher -> student: exact / likely / ambiguous / none.
 - `rc/extract.py`     reads scans with Claude vision (`claude-opus-5-5`) into `work/records.json`; every raw answer is
   cached in `work/raw/` so re-runs are free. Run as `op run --env-file=.env -- python -m rc --data D extract --month M`
   (`.env` holds only a 1Password reference). First measured cost: about $0.28 per 10 pages.
