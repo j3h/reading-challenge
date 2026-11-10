@@ -70,6 +70,10 @@ except extraction (OCR), the review UI and the one-command runner.
   carried over, so a reported mistake is fixed by hand (edit the total, hand over the prize). A month is applied once and only after the previous one. Every student needs a teacher.
 - `rc/render.py`      print PDF: per teacher a cover page (prize tally + bagging checklist), then that
   class's certificates (drawn by `make_certificates.draw_certificate`, unchanged). Letter landscape.
+- `rc/import_workbook.py` preferred one-time import: the master WORKBOOK (.xlsx). Totals = end of `--through`
+  month from the month tabs (PRIMARY's running total can already include the next month, or miss one); chained rows
+  = several sheets; stops at the "Prize | Level" stock table (a "Teacher" in the teacher column is a staff reader,
+  not a header). `--keep-ids` reuses IDs so review decisions stay valid. Every disagreement is noted per student.
 - `rc/import_master.py` one-time: master spreadsheet printed to PDF -> first checkpoint (name, teacher, grade,
   previous total). The prize "x" columns are deliberately ignored; red rows (no recent sheets) are only noted. `--teacher-alias OLD=NEW` merges classes.
 - `rc/workspace.py`   data folder (outside git, e.g. iCloud Drive): `<school year>/<month>/{scans,work,

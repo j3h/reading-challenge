@@ -7,7 +7,7 @@
   review   open the review screen in your browser (scan beside each question)
   decide   answer a question from the command line
   finish   write certificates.pdf, summary.txt and checkpoint.xlsx for the month
-  import-master  one-time: master spreadsheet PDF -> starting checkpoint for a season
+  import-master  one-time: master workbook (.xlsx) or its PDF -> starting checkpoint
 
 The data folder can also come from the READING_CHALLENGE_DATA environment variable.
 """
@@ -138,6 +138,19 @@ def cmd_import(args):
     out = wsp_.root / season / "start" / wsp.CHECKPOINT
     if out.exists() and not args.replace:
         sys.exit(f"{out} already exists; use --replace to overwrite it")
+    if args.pdf.lower().endswith(".xlsx"):
+        from rc import import_workbook
+        if not args.through:
+            sys.exit('a workbook needs --through, the last month to include, e.g. --through "September 2026"')
+        aliases = dict(a.split("=", 1) for a in args.teacher_alias if "=" in a)
+        keep = ck.load(args.keep_ids) if args.keep_ids else None
+        cp, report = import_workbook.parse_workbook(args.pdf, args.through, aliases, keep)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        wsp.save_atomic(lambda tmp: ck.save(cp, tmp), out)
+        print(f"Wrote {out}")
+        for line in report:
+            print("  -", line)
+        return
     extra = (["--questions", args.questions] if args.questions else [])
     for a in args.teacher_alias:
         extra += ["--teacher-alias", a]
@@ -185,8 +198,11 @@ def main(argv=None):
     p.add_argument("--duplicate", choices=["sum", "skip"])
     p.set_defaults(fn=cmd_decide)
     p = sub.add_parser("import-master")
-    p.add_argument("pdf")
+    p.add_argument("pdf", help="the master workbook (.xlsx, preferred) or a PDF printout of it")
     p.add_argument("--season", required=True, help='e.g. "2026-27"')
+    p.add_argument("--through", help='workbook only: totals as of the end of this month, e.g. "September 2026"')
+    p.add_argument("--keep-ids", metavar="CHECKPOINT", help="reuse student IDs from this checkpoint (same names), "
+                   "so decisions already made still point at the same children")
     p.add_argument("--questions", help="also write a plain-text list of questions about the master")
     p.add_argument("--teacher-alias", action="append", default=[], metavar="OLD=NEW",
                    help='use NEW wherever the master says OLD, e.g. "Biello/Tanner=Biello" (repeatable)')
