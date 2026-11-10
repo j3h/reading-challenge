@@ -231,3 +231,21 @@ def test_finished_files_are_served_only_once_the_month_is_finished(server, month
         assert fetch(base + "/file/" + name + "?t=" + token)[0] == 404
     status, body, _ = fetch(base + "/api/open", {"file": "../../etc/passwd"}, h)
     assert status == 409
+
+
+def test_a_new_child_can_be_chosen_on_their_other_sheets_and_extra_sheets_wait_for_a_person(month):
+    recs = rv.load_records(month.records_path) + [rv.SheetRecord("scan.pdf", 4, "Zed Newcomer", "Moren", "October", 15)]
+    rv.save_records(recs, month.records_path)
+    doc = pymupdf.open(month.folder.scans / "scan.pdf"); doc.new_page(); doc.saveIncr()
+    app = web.ReviewApp(month)
+    st = app.decide("scan.pdf#3", {"new_student": {"name": "Zed Newcomer", "teacher": "Moren"}, "pages": 40})
+    zed = next(p for p in st["roster"] if p["id"] == "new@scan.pdf#3")
+    assert zed["new_from"] == "p. 3" and zed["total"] == 0
+    p4 = by_key(st)["scan.pdf#4"]
+    assert p4["form"]["student"] == "new@scan.pdf#3" and p4["candidates"][0]["new_from"] == "p. 3"
+    assert p4["status"] == "open" and p4["can_accept"] and p4["needs_choice"]
+    assert p4["duplicate"]["so_far"] == 40 and p4["duplicate"]["sum"] == 55
+    st = app.accept_all()
+    assert by_key(st)["scan.pdf#4"]["status"] == "open"                 # never accepted all at once
+    st = app.decide("scan.pdf#4", {"student": "new@scan.pdf#3", "duplicate": "sum", "pages": 15})
+    assert by_key(st)["scan.pdf#4"]["status"] == "decided" and "added to" in by_key(st)["scan.pdf#4"]["outcome"]

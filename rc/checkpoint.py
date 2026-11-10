@@ -222,11 +222,12 @@ OPTIONAL_STUDENT_COLS = ["Also called"]     # older checkpoints do not have it
 HISTORY_COLS = ["Month", "ID", "Pages", "Total after", "Source"]
 
 
-def save(cp: Checkpoint, path, results: list[Result] | None = None, table=None) -> None:
+def save(cp: Checkpoint, path, results: list[Result] | None = None, table=None, sheets=None) -> None:
     """Write the checkpoint workbook.
 
-    Sheets: Students and History are the data (read back by `load`). 'Last month' and 'Meta'
-    are for people; `load` ignores 'Last month'. Pass `results` to fill 'Last month'."""
+    Sheets: Students and History are the data (read back by `load`). 'Last month', 'Sheets' and 'Meta'
+    are for people; `load` ignores them. Pass `results` to fill 'Last month', and `sheets` = (columns, rows)
+    for 'Sheets' (one row per scanned page: see rc/audit.py)."""
     from openpyxl import Workbook
     from openpyxl.styles import Font
     from openpyxl.utils import get_column_letter
@@ -243,6 +244,13 @@ def save(cp: Checkpoint, path, results: list[Result] | None = None, table=None) 
     for r in results or []:
         lm.append([month_label(cp.month) if cp.month else "", r.student.teacher, r.student.name, r.pages,
                    r.student.total, "; ".join(f"{p[1]}: {p[2]}" for p in r.prizes), r.source])
+
+    sh = None
+    if sheets:
+        sh = wb.create_sheet("Sheets")
+        sh.append(list(sheets[0]))
+        for row in sheets[1]:
+            sh.append(list(row))
 
     hs = wb.create_sheet("History")
     hs.append(HISTORY_COLS)
@@ -262,6 +270,15 @@ def save(cp: Checkpoint, path, results: list[Result] | None = None, table=None) 
         sheet.freeze_panes = "A2"
         for i, w in enumerate(widths, start=1):
             sheet.column_dimensions[get_column_letter(i)].width = w
+    if sh is not None:
+        for c in sh[1]:
+            c.font = Font(bold=True)
+        sh.freeze_panes = "B2"
+        for i, w in enumerate([8, 20, 16, 10, 10, 24, 30, 24, 14, 11, 12, 11, 50], start=1):
+            sh.column_dimensions[get_column_letter(i)].width = w
+        for col in "DEJKL":
+            for cell in sh[col][1:]:
+                cell.number_format = "#,##0"
     for sheet, cols in ((ws, "E"), (lm, "DE"), (hs, "CD")):
         for col in cols:
             for cell in sheet[col][1:]:

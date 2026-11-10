@@ -57,7 +57,7 @@ class ReviewApp:
             r = item.record
             d = decisions.get(r.key, {})
             sug = suggestions.get(r.key)
-            if item.skipped:
+            if item.skipped and not item.merged:
                 status = STATUS_SKIPPED
             elif r.key in open_keys:
                 status = STATUS_OPEN
@@ -69,29 +69,38 @@ class ReviewApp:
                 "read": {"name": r.name, "teacher": r.teacher, "month": r.month, "pages": r.pages,
                          "confidence": r.confidence, "pages_confidence": r.pages_confidence, "note": r.note,
                          "boxes": sorted(r.boxes)},
-                "status": status, "decision": d, "outcome": self._outcome(item, cp),
+                "status": status, "decision": d, "outcome": self._outcome(item, cp, plan),
                 "warnings": item.warnings,
                 "reasons": sug.reasons if sug else [],
                 "can_accept": bool(sug and sug.decision),
-                "form": self._form(item, cp, d, sug),
-                "candidates": [self._cand(c) for c in (match.candidates[:6] if match else [])],
-                "duplicate": any(i.kind == "duplicate" and i.key == r.key for i in plan.issues) or "duplicate" in d,
+                "needs_choice": bool(sug and sug.needs_choice),
+                "form": self._form(item, cp, d, sug, plan),
+                "candidates": [self._cand(c, plan) for c in (match.candidates[:6] if match else [])],
+                "duplicate": item.dup,
             })
         counts = {k: sum(1 for s in sheets if s["status"] == k)
                   for k in (STATUS_OPEN, STATUS_AUTO, STATUS_DECIDED, STATUS_SKIPPED)}
         return {
             "finished": False, "month": ck.month_label(m.folder.month), "source": source,
             "ready": plan.ready and any(s["status"] in (STATUS_AUTO, STATUS_DECIDED) for s in sheets),
-            "counts": counts, "acceptable": sum(1 for s in sheets if s["status"] == STATUS_OPEN and s["can_accept"]),
+            "counts": counts, "acceptable": sum(1 for s in sheets if s["status"] == STATUS_OPEN and s["can_accept"]
+                                                and not s["needs_choice"]),
             "sheets": sheets, "teachers": teachers,
             "roster": [{"id": s.id, "name": s.name, "teacher": s.teacher, "grade": s.grade,
-                        "nicknames": s.nicknames, "total": s.total}
-                       for s in sorted(cp.students.values(), key=lambda s: s.name.lower())
+                        "nicknames": s.nicknames, "total": s.total, "new_from": self._new_from(s.id, plan)}
+                       for s in sorted(list(cp.students.values()) + list(plan.pending.values()),
+                                       key=lambda s: s.name.lower())
                        if s.status == ck.ACTIVE],
         }
 
     @staticmethod
-    def _form(item, cp, d, sug) -> dict:
+    def _new_from(sid, plan) -> str:
+        """'p. 3' for a child being added as new from page 3 of this month's scans, else ''."""
+        key = rv.new_from(sid)
+        return next((f"p. {i.record.page}" for i in plan.settled if i.record.key == key), "") if key else ""
+
+    @staticmethod
+    def _form(item, cp, d, sug, plan) -> dict:
         """What the sheet's form shows: the person's decision, else what was settled, else the suggestion."""
         src = d if ("student" in d or "new_student" in d) else (sug.draft if sug else {})
         form = {"mode": "", "student": "", "new": {"name": item.record.name, "grade": ""}, "teacher": "",
@@ -99,7 +108,9 @@ class ReviewApp:
                 "remember_name": bool(src.get("remember_name")), "duplicate": d.get("duplicate") or
                 (sug.draft.get("duplicate") if sug else "") or ""}
         sid = src.get("student") or item.student_id
-        if sid and sid in cp.students:
+        if sid and sid in plan.pending:
+            form.update(mode="student", student=sid, teacher=plan.pending[sid].teacher)
+        elif sid and sid in cp.students:
             form.update(mode="student", student=sid, teacher=src.get("teacher") or cp.students[sid].teacher
                         or ((sug.draft.get("teacher") or "") if sug and sug.draft.get("student") == sid else ""))
         elif src.get("new_student") or item.new_student:
@@ -108,19 +119,20 @@ class ReviewApp:
                         teacher=n.get("teacher", ""))
         return form
 
-    @staticmethod
-    def _cand(c) -> dict:
+    @classmethod
+    def _cand(cls, c, plan) -> dict:
         s = c.student
         return {"id": s.id, "name": s.name, "teacher": s.teacher, "grade": s.grade, "score": c.score,
-                "reason": c.reason, "total": s.total}
+                "reason": c.reason, "total": s.total, "new_from": cls._new_from(s.id, plan)}
 
     @staticmethod
-    def _outcome(item, cp) -> str:
+    def _outcome(item, cp, plan) -> str:
         if item.skipped:
-            return f"skipped: {item.skipped}"
+            return item.skipped if item.merged else f"skipped: {item.skipped}"
         if item.student_id:
-            s = cp.students[item.student_id]
-            return f"{s.name} ({s.teacher or 'no teacher'})" + (f", pages {item.pages:,}" if item.pages is not None else "")
+            s = plan.student(cp, item.student_id)
+            new = " (new)" if item.student_id in plan.pending else ""
+            return f"{s.name}{new} ({s.teacher or 'no teacher'})" + (f", pages {item.pages:,}" if item.pages is not None else "")
         if item.new_student:
             n = item.new_student
             return f"NEW: {n['name']} ({n.get('teacher') or 'no teacher yet'})"
@@ -140,7 +152,8 @@ class ReviewApp:
                 cp, _ = self.month.previous()
                 decisions = self.month.decisions()
                 sug = rv.suggest(self.month.plan(), cp, decisions)
-                new = {k: v.decision for k, v in sug.items() if v.decision and decisions.get(k) != v.decision}
+                new = {k: v.decision for k, v in sug.items()
+                       if v.decision and not v.needs_choice and decisions.get(k) != v.decision}
                 if not new:
                     break
                 decisions.update(new)
@@ -212,8 +225,18 @@ _DECISION_KEYS = {"student", "remember_name", "new_student", "skip", "pages", "p
 
 
 # ---------------------------------------------------------------------------- HTTP
-def make_server(app: ReviewApp, port: int = 0) -> tuple[ThreadingHTTPServer, str]:
+HOME_PAGE = Path(__file__).with_name("home.html")
+
+
+def make_server(app: ReviewApp | None = None, port: int = 0, home=None) -> tuple[ThreadingHTTPServer, str]:
+    """One month's review screen (`app`), or the whole app (`home`: rc.app.Home) with a home screen at /
+    and each month's review at /review?m=2026-10."""
     token = secrets.token_urlsafe(16)
+
+    def review_for(query) -> ReviewApp:
+        if home is None:
+            return app
+        return home.review((query.get("m") or [""])[0])
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "rc-review"
@@ -243,6 +266,10 @@ def make_server(app: ReviewApp, port: int = 0) -> tuple[ThreadingHTTPServer, str
         def _json(self, code: int, obj):
             self._send(code, json.dumps(obj).encode("utf-8"))
 
+        def _page(self, path: Path):
+            html = path.read_text(encoding="utf-8").replace("__TOKEN__", token)
+            return self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
+
         def _authorised(self, query) -> bool:
             sent = self.headers.get("X-Token") or (query.get("t") or [""])[0]
             return self._host_ok() and secrets.compare_digest(sent, token)
@@ -253,20 +280,25 @@ def make_server(app: ReviewApp, port: int = 0) -> tuple[ThreadingHTTPServer, str
             query = parse_qs(url.query)
             if not self._host_ok():
                 return self._json(403, {"error": "bad host"})
+            if url.path == "/ping":                    # the launcher checks whether the app is already running
+                return self._send(200, b"rc-app", "text/plain")
             if url.path == "/":
-                html = PAGE.read_text(encoding="utf-8").replace("__TOKEN__", token)
-                return self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
+                return self._page(HOME_PAGE if home is not None else PAGE)
+            if url.path == "/review" and home is not None:
+                return self._page(PAGE)
             if not self._authorised(query):
                 return self._json(403, {"error": "bad token"})
             try:
+                if url.path == "/api/home" and home is not None:
+                    return self._json(200, home.state())
                 if url.path == "/api/state":
-                    return self._json(200, app.state())
+                    return self._json(200, review_for(query).state())
                 if url.path == "/crop":
-                    return self._send(200, app.scan_crop(query["key"][0], query["field"][0]), "image/jpeg")
+                    return self._send(200, review_for(query).scan_crop(query["key"][0], query["field"][0]), "image/jpeg")
                 if url.path == "/scan":
-                    return self._send(200, app.scan_image(query["key"][0]), "image/jpeg")
+                    return self._send(200, review_for(query).scan_image(query["key"][0]), "image/jpeg")
                 if url.path.startswith("/file/"):
-                    path, ctype = app.output(url.path[len("/file/"):])
+                    path, ctype = review_for(query).output(url.path[len("/file/"):])
                     return self._send(200, path.read_bytes(), ctype,
                                       download=None if ctype.startswith(("application/pdf", "text/")) else path.name)
             except KeyError:
@@ -277,23 +309,55 @@ def make_server(app: ReviewApp, port: int = 0) -> tuple[ThreadingHTTPServer, str
 
         def do_POST(self):
             url = urlparse(self.path)
-            if not self._authorised({}):
+            query = parse_qs(url.query)
+            if not self._authorised(query):
                 return self._json(403, {"error": "bad token"})
             try:
                 length = int(self.headers.get("Content-Length") or 0)
+                if url.path == "/api/home/upload" and home is not None:     # the body is the file itself
+                    return self._json(200, home.add_scan(query["m"][0], query["name"][0], self.rfile, length))
                 body = json.loads(self.rfile.read(length) or b"{}")
+                if home is not None and url.path.startswith("/api/home/"):
+                    return self._json(200, self._home_action(url.path[len("/api/home/"):], body))
+                review = review_for(query)
                 if url.path == "/api/decision":
-                    return self._json(200, app.decide(body["key"], body.get("decision") or {}))
+                    return self._json(200, review.decide(body["key"], body.get("decision") or {}))
                 if url.path == "/api/accept_all":
-                    return self._json(200, app.accept_all())
+                    return self._json(200, review.accept_all())
                 if url.path == "/api/finish":
-                    return self._json(200, app.finish())
+                    return self._json(200, review.finish())
                 if url.path == "/api/open":
-                    app.open_locally(str(body.get("file", "")))
+                    review.open_locally(str(body.get("file", "")))
                     return self._json(200, {"ok": True})
             except (ck.CheckpointError, KeyError, ValueError, OSError, subprocess.CalledProcessError) as e:
                 return self._json(409, {"error": str(e)})
             self._json(404, {"error": "not found"})
+
+        def _home_action(self, action: str, body: dict) -> dict:
+            month = str(body.get("month", ""))
+            if action == "folder":
+                return home.choose_data_folder() if body.get("choose") else home.set_data_folder(str(body["path"]))
+            if action == "key":
+                from rc import settings
+                settings.set_api_key(str(body.get("key", "")))
+                return home.state()
+            if action == "forget_key":
+                from rc import settings
+                settings.forget_api_key()
+                return home.state()
+            if action == "month":
+                return home.create_month(month)
+            if action == "read":
+                return home.start_reading(month)
+            if action == "reopen":
+                return home.reopen(month)
+            if action == "finder":
+                home.show_in_finder(month or None, str(body.get("what", "folder")))
+                return home.state()
+            if action == "quit":
+                threading.Thread(target=self.server.shutdown, daemon=True).start()
+                return {"quit": True}
+            raise KeyError(action)
 
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     return server, token
@@ -310,5 +374,21 @@ def serve(month: runner.Month, open_browser: bool = True, port: int = 0) -> None
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nStopped. Decisions are saved in", month.decisions_path)
+    finally:
+        server.server_close()
+
+
+def serve_app(home, open_browser: bool = True, port: int = 0) -> None:
+    """The whole app: home screen, then each month's review."""
+    import webbrowser
+    server, _ = make_server(home=home, port=port)
+    url = f"http://127.0.0.1:{server.server_address[1]}/"
+    print(f"Reading Challenge: {url}\nClose this window or press Ctrl-C to stop (nothing is lost).", flush=True)
+    if open_browser:
+        webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
     finally:
         server.server_close()

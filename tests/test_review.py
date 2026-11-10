@@ -227,7 +227,7 @@ def sug(records, cp, decisions=None):
 def test_suggestion_for_a_likely_match_settles_it_when_accepted(cp):
     records = [rec(1, "Sam Sampel", "Park", 12)]
     s = sug(records, cp)["oct.pdf#1"]
-    assert s.decision == {"student": "S0002", "remember_name": True, "pages": 12}
+    assert s.decision == {"student": "S0002", "remember_name": False, "pages": 12}     # a misspelling: not remembered
     assert rv.plan(records, cp, "October 2026", {"oct.pdf#1": s.decision}).ready
 
 
@@ -278,3 +278,75 @@ def test_every_decision_change_is_logged(tmp_path):
         ("a#1", None, {"student": "S1"}, "review screen"),
         ("a#2", None, {"skip": "x"}, "accept all"),
         ("a#1", {"student": "S1"}, None, "review screen")]
+
+
+# ------------------------------------------------------------------ several sheets for one child
+def test_three_sheets_are_taken_in_page_order_add_replace_skip(cp):
+    records = [rec(1, "Ada Example", "Lopez", 30), rec(2, "Ada Example", "Lopez", 20), rec(3, "Ada Example", "Lopez", 70),
+               rec(4, "Ada Example", "Lopez", 70)]
+    p = rv.plan(records, cp, "October 2026", {})
+    assert kinds(p) == [("oct.pdf#2", "duplicate"), ("oct.pdf#3", "duplicate"), ("oct.pdf#4", "duplicate")]
+    d = {"oct.pdf#2": {"duplicate": "sum"}, "oct.pdf#3": {"duplicate": "replace"}, "oct.pdf#4": {"duplicate": "skip"}}
+    p = rv.plan(records, cp, "October 2026", d)
+    assert p.ready
+    items = {i.record.page: i for i in p.settled}
+    assert items[3].dup == {"others": ["oct.pdf p. 1", "oct.pdf p. 2"], "so_far": 50, "this": 70, "sum": 120,
+                            "replace": 70}
+    assert items[2].merged and items[3].merged and not items[4].merged and items[4].skipped
+    _, entries, notes = rv.finalize(p, cp, TABLE)
+    assert [(e.student_id, e.pages, e.source) for e in entries] == [("S0001", 70, "oct.pdf p. 3")]
+    assert any("p. 3" in n and "replaces oct.pdf p. 1, oct.pdf p. 2" in n for n in notes)
+
+
+def test_extra_sheets_are_suggested_but_never_accepted_all_at_once(cp):
+    records = [rec(1, "Ada Example", "Lopez", 30), rec(2, "Ada Example", "Lopez", 20)]
+    s = sug(records, cp)["oct.pdf#2"]
+    assert s.decision["duplicate"] == "sum" and s.needs_choice
+
+
+def test_a_new_child_is_added_once_and_their_other_sheets_match_them(cp):
+    records = [rec(3, "Joey", "Biello", 1504), rec(7, "Joey", "Biello", 200)]
+    d = {"oct.pdf#3": {"new_student": {"name": "Joey", "teacher": "Biello"}}}
+    p = rv.plan(records, cp, "October 2026", d)
+    # the second sheet matches the child being added from p. 3 and asks what to do with its pages
+    assert p.matches["oct.pdf#7"].best.student.id == "new@oct.pdf#3"
+    assert kinds(p) == [("oct.pdf#7", "duplicate")]
+    s = rv.suggest(p, cp, d)["oct.pdf#7"]
+    assert s.decision["student"] == "new@oct.pdf#3" and s.decision["remember_name"] is False
+    assert "added as new from oct.pdf p. 3" in s.reasons[0] or "added as new" in " ".join(s.reasons)
+    d["oct.pdf#7"] = {"student": "new@oct.pdf#3", "duplicate": "sum"}
+    new_cp, entries, notes = rv.finalize(rv.plan(records, cp, "October 2026", d), cp, TABLE)
+    joeys = [s for s in new_cp.students.values() if s.name == "Joey"]
+    assert len(joeys) == 1 and [(e.student_id, e.pages) for e in entries] == [(joeys[0].id, 1704)]
+
+
+def test_an_earlier_sheet_can_point_at_a_child_added_from_a_later_one(cp):
+    records = [rec(2, "Joey", "Biello", 100), rec(5, "Joey B", "Biello", 50)]
+    d = {"oct.pdf#5": {"new_student": {"name": "Joey Bee", "teacher": "Biello"}},
+         "oct.pdf#2": {"student": "new@oct.pdf#5", "pages": 100}, }
+    p = rv.plan(records, cp, "October 2026", d)
+    assert kinds(p) == [("oct.pdf#5", "duplicate")]                  # page order: p. 5 is the later sheet
+    d["oct.pdf#5"]["duplicate"] = "sum"
+    new_cp, entries, _ = rv.finalize(rv.plan(records, cp, "October 2026", d), cp, TABLE)
+    assert [s.name for s in new_cp.students.values()][-1] == "Joey Bee" and entries[0].pages == 150
+
+
+def test_pointing_at_a_new_child_who_is_no_longer_being_added_is_caught(cp):
+    records = [rec(3, "Joey", "Biello", 10), rec(7, "Joey", "Biello", 20)]
+    d = {"oct.pdf#3": {"skip": "changed my mind"}, "oct.pdf#7": {"student": "new@oct.pdf#3"}}
+    p = rv.plan(records, cp, "October 2026", d)
+    assert kinds(p) == [("oct.pdf#7", "who")] and "no longer being added" in p.issues[0].message
+
+
+def test_two_sheets_both_marked_new_with_the_same_name_are_one_child(cp):
+    records = [rec(3, "Joey", "Biello", 10), rec(7, "Joey", "Biello", 20)]
+    d = {"oct.pdf#3": {"new_student": {"name": "Joey", "teacher": "Biello"}},
+         "oct.pdf#7": {"new_student": {"name": "Joey", "teacher": "Biello"}, "duplicate": "sum"}}
+    new_cp, entries, _ = rv.finalize(rv.plan(records, cp, "October 2026", d), cp, TABLE)
+    assert sum(s.name == "Joey" for s in new_cp.students.values()) == 1 and entries[0].pages == 30
+
+
+def test_only_nicknames_and_first_names_are_remembered_by_default(cp):
+    cp.students["S0004"] = ck.Student("S0004", "Rosalind Cox", "Tracy")
+    got = sug([rec(1, "Rozzie", "Tracy", 5), rec(2, "Ada", "Lopez", 5), rec(3, "Ada Exampel", "Lopez", 5)], cp)
+    assert [got[f"oct.pdf#{i}"].decision["remember_name"] for i in (1, 2, 3)] == [True, True, False]

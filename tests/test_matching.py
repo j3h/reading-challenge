@@ -136,3 +136,19 @@ def test_a_name_the_child_is_known_by_matches_exactly():
     m = mt.match("Rozzie", "Tracy", cp)
     assert m.status == mt.EXACT and m.best.student.id == "S0001" and "also called Rozzie" in m.best.reason
     assert mt.match("Ros C", "Tracy", cp).best.student.id == "S0001"
+
+
+def test_a_remembered_name_counts_only_in_the_childs_own_class():
+    cp = roster(("Rosalind Cox", "Tracy"))
+    cp.students["S0001"] = ck.replace(cp.students["S0001"], nicknames="Rozzie")
+    for teacher in ("", "Moren"):                      # no teacher on the sheet, or another class
+        m = mt.match("Rozzie", teacher, cp)
+        assert m.status != mt.EXACT and m.best.student.id == "S0001"
+        assert m.best.score <= mt.REMEMBERED_ELSEWHERE_CAP and "remembered as Rozzie" in m.best.reason
+    assert mt.match("Rozzie", "Ms. Tracy", cp).status == mt.EXACT
+
+
+def test_extra_students_being_added_this_month_can_be_matched():
+    new = ck.Student("new@oct.pdf#3", "Joey", "Biello")
+    m = mt.match("Joey", "Biello", CP, [new])
+    assert m.status == mt.EXACT and m.best.student.id == "new@oct.pdf#3"

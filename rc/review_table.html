@@ -36,6 +36,8 @@
   header .badge { font: 700 11px Montserrat, sans-serif; letter-spacing: .08em; text-transform: uppercase; background: var(--teal);
                   color: #fff; border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
   header h1 { font-size: 18px; font-weight: 600; margin: 0; }
+  header a.home { color: var(--navy-ink); text-decoration: none; font: 600 13px Montserrat, sans-serif; opacity: .85; }
+  header a.home:hover { opacity: 1; text-decoration: underline; }
   header .counts { flex: 1; color: rgba(255,255,255,.8); font-size: 13px; }
   header button { background: transparent; color: var(--navy-ink); border-color: rgba(255,255,255,.45); }
   header button:hover:not(:disabled) { border-color: #fff; background: rgba(255,255,255,.1); }
@@ -60,8 +62,8 @@
   .unsure { color: var(--open); font-weight: 600; }
   .why { font-size: 12px; color: var(--open); }
   table { table-layout: fixed; }
-  col.c-st { width: 118px; } col.c-pg { width: 46px; } col.c-name { width: 17%; } col.c-stu { width: 25%; }
-  col.c-tea { width: 17%; } col.c-pp { width: 13%; }
+  col.c-st { width: 118px; } col.c-pg { width: 46px; } col.c-name { width: 17%; } col.c-stu { width: 23%; }
+  col.c-tea { width: 17%; } col.c-pp { width: 15%; }
   tr.row.sel td { vertical-align: top; padding-bottom: 12px; }
   td .stack { display: flex; flex-direction: column; gap: 6px; }
   td .stack > select, td .stack > input { width: 100%; }
@@ -78,6 +80,11 @@
   .box ul { margin: 2px 0 0; padding-left: 18px; }
   .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
   .hint { color: var(--muted); font-size: 12px; }
+  .box.dup { text-align: left; display: flex; flex-direction: column; gap: 6px; margin: 0; }
+  .box.dup { padding: 6px 8px; }
+  .box.dup label { display: flex; gap: 5px; align-items: center; white-space: nowrap; cursor: pointer; }
+  .box.dup input { margin: 0; flex: none; }
+  .box.dup label b { margin-left: auto; font-variant-numeric: tabular-nums; }
   tr.bar-row td { background: var(--sel); padding: 0 10px 10px; border-bottom: 1px solid var(--line); }
   .ctl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding-top: 8px; border-top: 1px dashed var(--line); }
   .ctl u { text-decoration-thickness: 2px; text-underline-offset: 2px; }
@@ -94,6 +101,7 @@
 </head>
 <body>
 <header>
+  <a id="home" class="home" href="/" hidden>← All months</a>
   <span class="badge">BCS PTA</span>
   <h1 id="title">Reading Challenge review</h1>
   <div class="counts" id="counts"></div>
@@ -109,6 +117,8 @@
 <script>
 "use strict";
 const TOKEN = "__TOKEN__";
+const MONTH = new URLSearchParams(location.search).get("m");          // set when opened from the app's home screen
+const AUTH = "t=" + TOKEN + (MONTH ? "&m=" + encodeURIComponent(MONTH) : "");
 let state = null, selected = null, form = null, onlyOpen = false, showSheet = false;
 const $ = (id) => document.getElementById(id);
 
@@ -126,7 +136,7 @@ function el(tag, attrs, ...kids) {              // text only: nothing read from 
 }
 function fail(msg) { const e = $("error"); e.textContent = msg; e.style.display = "block"; setTimeout(() => e.style.display = "none", 6000); }
 async function api(path, body) {
-  const res = await fetch(path + (path.includes("?") ? "&" : "?") + "t=" + TOKEN, body === undefined ? {} :
+  const res = await fetch(path + (path.includes("?") ? "&" : "?") + AUTH, body === undefined ? {} :
     { method: "POST", headers: { "X-Token": TOKEN, "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || res.statusText);
@@ -151,7 +161,9 @@ async function save(decision, advance) {
   const from = selected;
   try { state = await api("/api/decision", { key: from, decision }); } catch (e) { return fail(e.message); }
   form = null;
-  if (advance) { const n = nextOpen(from); selected = n ? n.key : null; }
+  const still = state.sheets && state.sheets.find((x) => x.key === from);
+  // stay on the sheet if it still has a question (e.g. it turned out to be this child's second sheet)
+  if (advance && !(still && still.status === "open")) { const n = nextOpen(from); selected = n ? n.key : null; }
   render(); scrollToSel();
 }
 
@@ -159,7 +171,8 @@ async function save(decision, advance) {
 function studentCell(s) {
   const f = s.form;
   if (s.status === "skipped") return el("span", { class: "muted" }, s.outcome);
-  if (f.mode === "student") { const p = state.roster.find((x) => x.id === f.student); return p ? p.name : "?"; }
+  if (f.mode === "student") { const p = state.roster.find((x) => x.id === f.student);
+    return p ? el("span", {}, p.name, p.new_from ? el("span", { class: "muted" }, ` (new, ${p.new_from})`) : "") : "?"; }
   if (f.mode === "new") return el("span", {}, f.new.name || "?", el("span", { class: "muted" }, " (new)"));
   return el("span", { class: "muted" }, "?");
 }
@@ -176,7 +189,7 @@ function render() {
     body.append(s.key === selected ? openRow(s) : closedRow(s));
     if (s.key === selected) body.append(controlBar(s));
     if (s.key === selected && showSheet) body.append(el("tr", { class: "sheet" }, el("td", { colspan: 7 },
-      el("img", { src: "/scan?key=" + encodeURIComponent(s.key) + "&t=" + TOKEN, alt: "Scanned sheet " + s.label }))));
+      el("img", { src: "/scan?key=" + encodeURIComponent(s.key) + "&" + AUTH, alt: "Scanned sheet " + s.label }))));
   }
   $("app").replaceChildren(el("table", {},
     el("colgroup", {}, ["c-st", "c-pg", "c-name", "c-stu", "c-tea", "c-pp", "c-chk"].map((c) => el("col", { class: c }))),
@@ -192,7 +205,8 @@ function closedRow(s) {
     el("td", {}, studentCell(s)),
     el("td", {}, s.status === "skipped" ? "" : (s.form.teacher || el("span", { class: "why" }, "choose"))),
     el("td", { class: "num" }, s.status === "skipped" ? "" : fmt(s.form.pages), r.pages_confidence !== "high" && s.status !== "skipped" ? el("span", { class: "unsure" }, " ?") : ""),
-    el("td", {}, s.status === "open" ? el("span", { class: "why" }, s.reasons.join(" · ")) : el("span", { class: "muted" }, s.warnings[0] || "")));
+    el("td", {}, s.status === "open" ? el("span", { class: "why" }, shortPages(s.reasons.join(" · ")))
+      : el("span", { class: "muted" }, s.duplicate && s.status !== "skipped" ? shortPages(s.outcome) : (s.warnings[0] || ""))));
 }
 
 // ---------------------------------------------------------------- actions (buttons in the bar under the open row, and keys)
@@ -220,10 +234,27 @@ function controlBar(s) {
     btn("KeyW", showSheet ? "▾ Hide whole sheet" : "▸ Whole sheet"))));
 }
 
+// "Reading Challenge Sheets October 2026.pdf p. 3" -> "p. 3" (only one scan file per month, usually)
+const shortPages = (text) => [...new Set(state.sheets.map((x) => x.file))].reduce((t, f) => t.split(f + " ").join(""), String(text));
+
+// another sheet for a child who already has one this month: add / replace / skip, with what each gives
+function dupChoice(s, f) {
+  const d = s.duplicate, others = shortPages(d.others.join(", ")), mine = f.pages == null ? null : Number(f.pages);
+  const so = d.so_far;
+  const opts = [["sum", "Add", so == null || mine == null ? "?" : fmt(so + mine), "add this sheet's pages to " + others],
+                ["replace", "Replace", fmt(mine), "use only this sheet's pages (its total already includes " + others + ")"],
+                ["skip", "Skip", fmt(so), "same sheet as " + others + ": ignore this one"]];
+  const name = "dup-" + s.key;
+  return el("div", { class: "box why dup" }, el("div", {}, `Also ${others}: ${fmt(so)}`),
+    opts.map(([v, text, total, title]) => el("label", { title },
+      el("input", { type: "radio", name, value: v, checked: (f.duplicate || "sum") === v,
+                    onchange: () => { f.duplicate = v; } }), ` ${text} `, el("b", {}, total))));
+}
+
 function snip(s, field) {     // the handwriting a value was read from, right under the value
   if (!s.read.boxes.includes(field)) return null;
   const img = el("img", { class: "snip", alt: "", title: "What the sheet says (click to enlarge)",
-    src: `/crop?key=${encodeURIComponent(s.key)}&field=${field}&t=${TOKEN}`, onclick: (e) => { e.stopPropagation(); e.target.classList.toggle("big"); } });
+    src: `/crop?key=${encodeURIComponent(s.key)}&field=${field}&${AUTH}`, onclick: (e) => { e.stopPropagation(); e.target.classList.toggle("big"); } });
   img.addEventListener("error", () => img.remove());
   return img;
 }
@@ -238,7 +269,7 @@ function openRow(s) {
     el("span", {}, r.name || "(no name)", r.confidence !== "high" ? el("span", { class: "unsure" }, " ?") : ""), snip(s, "name"),
     r.note ? el("span", { class: "hint" }, r.note) : null));
   const checkCell = el("td", {}, el("div", { class: "stack" },
-    s.status === "open" && s.reasons.length ? el("div", { class: "box why" }, el("ul", {}, s.reasons.map((x) => el("li", {}, x)))) : null,
+    s.status === "open" && s.reasons.length ? el("div", { class: "box why" }, el("ul", {}, s.reasons.map((x) => el("li", {}, shortPages(x))))) : null,
     ...s.warnings.map((w) => el("div", { class: "box info" }, w)), snip(s, "month")));
   if (s.status === "skipped") {
     checkCell.firstChild.append(el("div", { class: "box info" }, s.outcome));
@@ -258,7 +289,8 @@ function openRow(s) {
     const p = state.roster.find((x) => x.id === f.student); if (p) options.unshift({ ...p });
   }
   for (const c of options) who.append(el("option", { value: c.id, selected: f.mode === "student" && f.student === c.id },
-    `${c.name} · ${c.teacher || "no teacher"}${c.grade ? " · gr " + c.grade : ""} · ${fmt(c.total)} pp`));
+    c.new_from ? `${c.name} · ${c.teacher || "no teacher"} · new, from ${c.new_from}`
+               : `${c.name} · ${c.teacher || "no teacher"}${c.grade ? " · gr " + c.grade : ""} · ${fmt(c.total)} pp`));
   who.append(el("option", { value: "__new", selected: f.mode !== "student" }, "New student…"));
   const finder = el("input", { list: "rosterlist", placeholder: "Find on roster…" });
   finder.addEventListener("change", () => {
@@ -272,17 +304,16 @@ function openRow(s) {
     if (f.new.name && !f.new.name.trim().includes(" ")) studentStack.append(el("span", { class: "hint" }, "Only a first name: the certificate will print just this."));
   }
   studentStack.append(finder, el("datalist", { id: "rosterlist" }, state.roster.map((p) => el("option", { value: `${p.name} (${p.teacher || "no teacher"})` }))));
-  if (f.mode === "student" && r.name) {
+  const pickedNew = f.mode === "student" && (state.roster.find((x) => x.id === f.student) || {}).new_from;
+  if (f.mode === "student" && r.name && !pickedNew) {
     const p = state.roster.find((x) => x.id === f.student);
     if (p && p.name.toLowerCase() !== r.name.trim().toLowerCase())
       studentStack.append(el("label", { class: "hint" }, el("input", { type: "checkbox", checked: !!f.remember_name, onchange: (e) => f.remember_name = e.target.checked }), ` recognise "${r.name}" next time`));
   }
-  if (s.duplicate) studentStack.append(el("select", { onchange: (e) => f.duplicate = e.target.value, title: "Second sheet for this child" },
-    el("option", { value: "sum", selected: f.duplicate !== "skip" }, "2nd sheet: add pages"),
-    el("option", { value: "skip", selected: f.duplicate === "skip" }, "2nd sheet: skip it")));
   // teacher
   const isOther = f.otherTeacher || (f.teacher && !state.teachers.includes(f.teacher));
-  const teacherStack = el("div", { class: "stack" }, el("select", { onchange: (e) => { f.otherTeacher = e.target.value === "__other"; f.teacher = f.otherTeacher ? "" : e.target.value; render(); } },
+  const teacherStack = el("div", { class: "stack" }, el("select", { disabled: !!pickedNew, title: pickedNew ? `Set on ${pickedNew}, where they were added` : "",
+      onchange: (e) => { f.otherTeacher = e.target.value === "__other"; f.teacher = f.otherTeacher ? "" : e.target.value; render(); } },
     el("option", { value: "" }, "Choose…"),
     state.teachers.map((t) => el("option", { value: t, selected: !isOther && t === f.teacher }, t)),
     el("option", { value: "__other", selected: isOther }, "Someone else…")),
@@ -290,13 +321,16 @@ function openRow(s) {
     snip(s, "teacher"));
   // pages
   const pagesStack = el("div", { class: "stack" },
-    el("input", { type: "number", min: 0, value: f.pages ?? "", oninput: (e) => f.pages = e.target.value === "" ? null : Number(e.target.value) }),
-    snip(s, "total"));
+    el("input", { type: "number", min: 0, value: f.pages ?? "", oninput: (e) => f.pages = e.target.value === "" ? null : Number(e.target.value),
+      onchange: () => s.duplicate && render() }),
+    snip(s, "total"), s.duplicate ? dupChoice(s, f) : null);
   const editable = (child) => el("td", { onclick: stop }, child);
   return el("tr", { class: "row sel", onclick: () => open(s.key) }, statusCell, el("td", { class: "muted" }, s.page), nameCell,
     editable(studentStack), editable(teacherStack), el("td", { class: "num", onclick: stop }, pagesStack), editable(checkCell.firstChild));
 }
 
+
+const pickedNewId = (f) => f.mode === "student" && (state.roster.find((x) => x.id === f.student) || {}).new_from;
 
 function accept() {
   const f = form, s = sheet();
@@ -313,6 +347,7 @@ function accept() {
     d = { new_student: { name: f.new.name.trim(), teacher: f.teacher.trim(), grade: f.new.grade.trim() }, pages: Number(f.pages) };
   }
   if (s.duplicate) d.duplicate = f.duplicate || "sum";
+  if (pickedNewId(f)) delete d.teacher;
   save(d, true);
 }
 
@@ -326,17 +361,26 @@ function renderFinished() {
   const rows = Object.entries(state.files).map(([k, path]) => {
     const name = path.split("/").pop();
     return el("div", { class: "file" },
-      el("div", {}, el("a", { href: `/file/${encodeURIComponent(name)}?t=${TOKEN}`, target: "_blank", rel: "noopener" }, name),
+      el("div", {}, el("a", { href: `/file/${encodeURIComponent(name)}?${AUTH}`, target: "_blank", rel: "noopener" }, name),
         el("div", { class: "hint" }, what[k] || "")),
       el("button", { onclick: () => open(name) }, k === "checkpoint" ? "Open in spreadsheet app" : "Open in app"));
   });
   $("app").replaceChildren(
     el("div", { class: "files" }, el("h2", {}, "This month's files"), ...rows,
       el("div", { class: "file" }, el("div", { class: "hint" }, state.files.certificates.split("/").slice(0, -1).join("/")),
-        el("button", { onclick: () => open("folder") }, "Show folder in Finder"))),
+        el("button", { onclick: () => open("folder") }, "Show folder in Finder")),
+      MONTH ? el("div", { class: "file" }, el("div", { class: "hint" },
+        "Found a mistake? Reopen the month, fix it in review, and finish again. The files above are kept in a dated folder."),
+        el("button", { onclick: reopen }, "Reopen month")) : null),
     el("pre", { class: "summary" }, state.summary));
 }
+async function reopen() {
+  if (!confirm("Reopen " + state.month + "? Its certificates, summary and checkpoint are moved into a dated folder, and you can change any sheet and finish again.")) return;
+  try { await api("/api/home/reopen", { month: MONTH }); } catch (e) { return fail(e.message); }
+  location.reload();
+}
 
+if (MONTH) $("home").hidden = false;
 $("onlyOpen").addEventListener("change", (e) => { onlyOpen = e.target.checked; render(); });
 $("acceptAll").addEventListener("click", async () => {
   if (!confirm(`Accept the suggestion for ${state.acceptable} sheet(s)? You can still change any of them afterwards.`)) return;

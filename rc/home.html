@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reading Challenge</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Open+Sans:wght@400;600;700&display=swap">
+<style>
+  /* Same colours and type as the review screen (from the BCS PTA Reading Challenge page). */
+  :root {
+    --navy: #233b77; --navy-ink: #ffffff; --teal: #20b2a8;
+    --bg: #f4f7fb; --panel: #ffffff; --ink: #1f2937; --muted: #5a5a5a; --line: #dce3ee; --row: #f7f9fc;
+    --accent: #246cba; --accent-ink: #ffffff; --link: #008ac6; --open: #c2570c; --done: #17917f;
+    --warn-bg: #fff4e5; --info-bg: #eef3f9; --bad: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --navy: #1a2c5a; --navy-ink: #ffffff; --teal: #3cc7bc;
+            --bg: #121722; --panel: #1b2230; --ink: #e8edf5; --muted: #a3adbd; --line: #2e384a; --row: #202838;
+            --accent: #5b9be0; --accent-ink: #0d1420; --link: #4fb6e6; --open: #f0a05a; --done: #4fd1c0;
+            --warn-bg: #3a2c1c; --info-bg: #222c3d; --bad: #ff8a80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 "Open Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  h1, h2, h3, button, .step b { font-family: Montserrat, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  button, input, select { font: inherit; color: inherit; }
+  button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 14px; cursor: pointer; font-weight: 600; font-size: 14px; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  input { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; }
+  a { color: var(--link); }
+  header { background: var(--navy); color: var(--navy-ink); border-bottom: 4px solid var(--teal); padding: 12px 20px;
+           display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  header .badge { font: 700 11px Montserrat, sans-serif; letter-spacing: .08em; text-transform: uppercase; background: var(--teal);
+                  color: #fff; border-radius: 999px; padding: 3px 10px; }
+  header h1 { font-size: 20px; font-weight: 600; margin: 0; flex: 1; }
+  header button { background: transparent; color: var(--navy-ink); border-color: rgba(255,255,255,.45); }
+  main { max-width: 900px; margin: 0 auto; padding: 20px 16px 60px; display: flex; flex-direction: column; gap: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px; }
+  .card h2 { font-size: 18px; font-weight: 600; color: var(--link); margin: 0 0 10px; }
+  .card.warn { background: var(--warn-bg); }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .bad { color: var(--bad); }
+  .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 8px; }
+  @media (max-width: 700px) { .steps { grid-template-columns: 1fr; } }
+  .step { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .step b { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .step.done { border-color: var(--done); } .step.done b { color: var(--done); }
+  .step.now { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; } .step.now b { color: var(--accent); }
+  .step .what { font-size: 14px; }
+  .bar { height: 10px; border-radius: 99px; background: var(--info-bg); overflow: hidden; }
+  .bar > div { height: 100%; background: var(--teal); transition: width .4s; }
+  details summary { cursor: pointer; color: var(--muted); }
+  #error { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #b3261e; color: #fff;
+           padding: 10px 16px; border-radius: 10px; display: none; max-width: 80vw; z-index: 10; }
+</style>
+</head>
+<body>
+<header>
+  <span class="badge">BCS PTA</span>
+  <h1>Reading Challenge</h1>
+  <button id="settingsBtn">Settings</button>
+  <button id="quitBtn" title="Stop the app (nothing is lost)">Quit</button>
+</header>
+<main id="app"></main>
+<div id="error"></div>
+<script>
+"use strict";
+const TOKEN = "__TOKEN__";
+let state = null, showSettings = false, uploading = "", polling = null;
+const $ = (id) => document.getElementById(id);
+function el(tag, attrs, ...kids) {              // text only: nothing is ever parsed as HTML
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k === "value") e.value = v;
+    else if (v === true) e.setAttribute(k, "");
+    else if (v !== false && v != null && v !== "") e.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) e.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  return e;
+}
+function fail(msg) { const e = $("error"); e.textContent = msg; e.style.display = "block"; setTimeout(() => e.style.display = "none", 8000); }
+async function api(path, body) {
+  const res = await fetch(path + (path.includes("?") ? "&" : "?") + "t=" + TOKEN, body === undefined ? {} :
+    { method: "POST", headers: { "X-Token": TOKEN, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+const act = (path, body) => api(path, body).then((s) => { state = s; render(); }).catch((e) => fail(e.message));
+const fmt = (n) => Number(n).toLocaleString();
+const money = (n) => "$" + Number(n).toFixed(2);
+
+async function load() {
+  try { state = await api("/api/home"); } catch (e) { return fail(e.message); }
+  render();
+}
+
+// ---------------------------------------------------------------- settings
+function settingsCard(force) {
+  const key = el("input", { type: "password", placeholder: "sk-ant-…", autocomplete: "off", size: 36 });
+  const path = el("input", { value: state.data_folder, placeholder: "/Users/…/Reading Challenge", size: 50 });
+  const keyText = { environment: "Using the key from the command line (1Password).", keychain: "Saved in this Mac's Keychain.", "": "Not set yet." }[state.api_key];
+  return el("div", { class: "card" + (force ? " warn" : "") }, el("h2", {}, "Settings"),
+    el("h3", {}, "Data folder"),
+    el("p", { class: "muted" }, "The shared folder (in iCloud Drive) that holds each month's scans, checkpoint and certificates."),
+    el("div", { class: "row" },
+      state.mac ? el("button", { class: state.folder_ok ? "" : "primary", onclick: () => act("/api/home/folder", { choose: true }) }, "Choose folder…") : null,
+      path, el("button", { onclick: () => act("/api/home/folder", { path: path.value }) }, "Use this path")),
+    state.folder_ok ? null : el("p", { class: "bad" }, state.data_folder ? "That folder can't be found." : "No folder chosen yet."),
+    el("h3", {}, "Claude API key"),
+    el("p", { class: "muted" }, "Used to read the scanned sheets (about 3½ cents a page). It is kept in the Mac's Keychain, not in a file."),
+    el("p", {}, keyText),
+    el("div", { class: "row" }, key,
+      el("button", { class: state.api_key ? "" : "primary", onclick: () => { act("/api/home/key", { key: key.value }); key.value = ""; } }, state.api_key === "keychain" ? "Replace key" : "Save key"),
+      state.api_key === "keychain" ? el("button", { onclick: () => confirm("Remove the API key from this Mac?") && act("/api/home/forget_key", {}) }, "Remove") : null),
+    force ? null : el("p", {}, el("button", { onclick: () => { showSettings = false; render(); } }, "Done")));
+}
+
+// ---------------------------------------------------------------- a month
+function step(title, cls, what, ...actions) {
+  return el("div", { class: "step " + cls }, el("b", {}, title), el("div", { class: "what" }, what), ...actions);
+}
+function monthCard(m, open) {
+  const job = state.job && state.job.month === m.key ? state.job : null;
+  const reading = job && job.running;
+  const order = ["scans", "read", "review", "finish", "finished"];
+  const at = order.indexOf(m.step);
+  const cls = (i) => (at > i ? "done" : at === i ? "now" : "");
+  const review = () => location.href = "/review?m=" + encodeURIComponent(m.key);
+
+  const fileInput = el("input", { type: "file", accept: ".pdf,.jpg,.jpeg,.png,.tif,.tiff", multiple: true, hidden: true,
+    onchange: (e) => upload(m.key, [...e.target.files]) });
+  const scansWhat = m.scans.length ? `${m.scans.length} file${m.scans.length > 1 ? "s" : ""}, ${fmt(m.pages)} pages` : "No scans yet";
+  const steps = el("div", { class: "steps" },
+    step("1 · Scans", cls(0), uploading === m.key ? "Adding…" : scansWhat, fileInput,
+      m.finished ? null : el("button", { class: at === 0 ? "primary" : "", onclick: () => fileInput.click() }, "Add scan PDF…"),
+      el("button", { onclick: () => act("/api/home/finder", { month: m.key, what: "scans" }) }, "Show in Finder")),
+    step("2 · Read", cls(1),
+      reading ? el("div", {}, `${job.done} of ${job.total} pages`, el("div", { class: "bar" }, el("div", { style: `width:${job.total ? 100 * job.done / job.total : 0}%` })))
+              : m.pages ? `${fmt(m.read)} of ${fmt(m.pages)} pages read` : "—",
+      !m.finished && m.pages && m.read < m.pages && !reading
+        ? el("button", { class: at === 1 ? "primary" : "", disabled: !state.api_key || (state.job && state.job.running),
+            title: state.api_key ? "" : "Add the API key in Settings first",
+            onclick: () => confirm(`Read ${m.pages - m.read} page(s) with Claude? It costs about ${money(m.estimate)}.`) && act("/api/home/read", { month: m.key }) },
+            `Read ${fmt(m.pages - m.read)} pages (about ${money(m.estimate)})`) : null),
+    step("3 · Review", cls(2),
+      m.finished ? "Done" : m.open == null ? "—" : m.open ? `${m.open} of ${m.sheets} sheets need a look` : `All ${m.sheets} sheets settled`,
+      m.records && !m.finished ? el("button", { class: at === 2 ? "primary" : "", onclick: review }, "Review sheets →") : null),
+    step("4 · Finish", cls(3),
+      m.finished ? "Finished: certificates, summary and checkpoint are in the month's folder" : at === 3 ? "Ready" : "—",
+      m.finished ? el("button", { class: "primary", onclick: review }, "Open files →")
+                 : at === 3 ? el("button", { class: "primary", onclick: review }, "Finish in review →") : null));
+
+  return el("div", { class: "card" },
+    el("div", { class: "row" }, el("h2", { style: "flex:1;margin:0" }, m.label),
+      el("button", { onclick: () => act("/api/home/finder", { month: m.key }) }, "Month folder")),
+    m.starts_from ? el("p", { class: "muted" }, "Starts from: " + m.starts_from) : null,
+    m.problem ? el("p", { class: "bad" }, m.problem) : null,
+    m.still_in_icloud ? el("p", { class: "bad" }, `${m.still_in_icloud} file(s) are still downloading from iCloud. Open the month folder in Finder and wait for them.`) : null,
+    job && !job.running && job.error ? el("p", { class: "bad" }, "Reading stopped: " + job.error) : null,
+    job && !job.running && job.result ? el("p", {}, job.result) : null,
+    steps);
+}
+
+async function upload(month, files) {
+  uploading = month; render();
+  for (const f of files) {
+    try {
+      const res = await fetch(`/api/home/upload?m=${encodeURIComponent(month)}&name=${encodeURIComponent(f.name)}&t=${TOKEN}`,
+        { method: "POST", headers: { "X-Token": TOKEN, "Content-Type": "application/octet-stream" }, body: f });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      state = data;
+    } catch (e) { fail(`${f.name}: ${e.message}`); }
+  }
+  uploading = ""; render();
+}
+
+// ---------------------------------------------------------------- page
+function render() {
+  const app = $("app");
+  if (!state.folder_ok || !state.api_key) {
+    app.replaceChildren(el("div", { class: "card" }, el("h2", {}, "Welcome"),
+      el("p", {}, "Two things to set up once: where the data folder is, and the key for reading the scans.")), settingsCard(true),
+      ...(state.folder_ok ? months() : []));
+  } else {
+    app.replaceChildren(...(showSettings ? [settingsCard(false)] : []), ...months());
+  }
+  const running = state.job && state.job.running;
+  if (running && !polling) polling = setInterval(load, 1500);
+  if (!running && polling) { clearInterval(polling); polling = null; }
+}
+
+function months() {
+  const out = [];
+  const have = new Set(state.months.map((m) => m.key));
+  if (state.suggested && !have.has(state.suggested)) {
+    const pick = el("input", { type: "month", value: state.suggested });
+    out.push(el("div", { class: "card" }, el("h2", {}, "Start a month"),
+      el("div", { class: "row" }, pick, el("button", { class: "primary", onclick: () => act("/api/home/month", { month: pick.value }) }, "Start")),
+      el("p", { class: "muted" }, "Starts from: " + (state.suggested_starts_from || "nothing yet"))));
+  }
+  const [latest, ...older] = state.months;
+  if (latest) out.push(monthCard(latest, true));
+  if (older.length) out.push(el("details", {}, el("summary", {}, `Earlier months (${older.length})`),
+    el("div", { style: "display:flex;flex-direction:column;gap:16px;margin-top:12px" }, older.map((m) => monthCard(m, false)))));
+  return out;
+}
+
+$("settingsBtn").addEventListener("click", () => { showSettings = !showSettings; render(); });
+$("quitBtn").addEventListener("click", async () => {
+  if (!confirm("Quit Reading Challenge? Everything is saved; double-click the app to start it again.")) return;
+  try { await api("/api/home/quit", {}); } catch (e) { /* stopping */ }
+  document.body.replaceChildren(el("main", {}, el("div", { class: "card" }, el("h2", {}, "Reading Challenge has stopped"),
+    el("p", {}, "Everything is saved. You can close this tab."))));
+});
+load();
+</script>
+</body>
+</html>

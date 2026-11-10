@@ -11,6 +11,13 @@ status the review step acts on:
 
 Teacher agreement raises a score and a clear conflict lowers it, but teachers change between years and
 classes get combined ("Biello/Tanner"), so teacher alone never makes or breaks a match.
+
+Two kinds of nickname:
+    built-in groups (Rozzie/Rosalind)   global, but a match through them is never more than "likely"
+    names remembered from review        belong to one child and count only in that child's own class: the
+                                        sheet's teacher must agree. Otherwise (other class, no teacher on
+                                        the sheet) they only make a suggestion a person confirms, so a name
+                                        remembered years ago never settles a sheet on its own.
 """
 from __future__ import annotations
 
@@ -65,6 +72,9 @@ def name_group(token: str) -> set[str]:
 
 def _ratio(a: str, b: str) -> float:
     return SequenceMatcher(None, a, b).ratio()
+
+
+REMEMBERED_ELSEWHERE_CAP = 0.79   # a remembered name outside the child's class: "likely" at most
 
 
 def name_score(sheet: str, known: str, nicknames=()) -> tuple[float, str]:
@@ -173,10 +183,17 @@ def _same_name(c: "Candidate") -> bool:
 def _score_pool(name, teacher, students):
     out = []
     for s in students:
+        agreement = teacher_agreement(teacher, s.teacher)
         score, why = name_score(name, s.name, s.nickname_list)
+        if "(also called" in why and agreement != "agree":
+            # remembered names count only in the child's own class
+            plain = name_score(name, s.name)
+            nick = why[why.index("(also called") + len("(also called "):-1]
+            capped = (min(score, REMEMBERED_ELSEWHERE_CAP),
+                      f"remembered as {nick} in {s.teacher or 'another class'}")
+            score, why = max(plain, capped)
         if score < PLAUSIBLE_SCORE - 0.1:
             continue
-        agreement = teacher_agreement(teacher, s.teacher)
         if agreement == "agree":
             score, why = min(1.0, score + 0.10), why + ", same teacher"
         elif agreement == "conflict":
@@ -187,9 +204,10 @@ def _score_pool(name, teacher, students):
     return sorted(out, key=lambda c: (not _same_name(c), -c.score, c.student.name))
 
 
-def match(name: str, teacher: str, cp: ck.Checkpoint) -> Match:
-    """Best students for a sheet. Students who have left are never offered."""
-    pool = [s for s in cp.students.values() if s.status == ck.ACTIVE]
+def match(name: str, teacher: str, cp: ck.Checkpoint, extra=()) -> Match:
+    """Best students for a sheet. Students who have left are never offered. `extra`: more students to consider
+    (children added as new from other sheets this month)."""
+    pool = [s for s in cp.students.values() if s.status == ck.ACTIVE] + list(extra)
     cands = _score_pool(name, teacher, pool)
     if cands:
         same = [c for c in cands if _same_name(c)]

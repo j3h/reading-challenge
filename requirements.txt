@@ -3,3 +3,4 @@ fonttools>=4.50   # used by PyMuPDF to subset embedded fonts
 pytest>=8        # tests only
 openpyxl>=3.1   # checkpoint workbooks (rc/checkpoint.py)
 anthropic>=1.0   # reads scanned sheets (rc/extract.py)
+keyring>=25      # the app keeps the Claude API key in the macOS Keychain (rc/settings.py)

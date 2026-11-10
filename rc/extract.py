@@ -206,7 +206,7 @@ def raw_path(raw_dir: Path, file: str, page: int) -> Path:
 
 
 def extract_month(client, month_folder: wsp.MonthFolder, model: str = DEFAULT_MODEL, dpi: int = DEFAULT_DPI,
-                  pages: str | None = None, force: bool = False, workers: int = 4, log=print):
+                  pages: str | None = None, force: bool = False, workers: int = 4, log=print, on_page=None):
     """Read every scan in the month folder. Returns (records, dropped, usage); writes work/records.json."""
     files = month_folder.scan_files()
     if not files:
@@ -223,6 +223,12 @@ def extract_month(client, month_folder: wsp.MonthFolder, model: str = DEFAULT_MO
     log(f"{len(jobs)} page(s); {len(jobs) - todo} already read, sending {todo} ({workers} at a time)")
 
     def run(job):
+        out = _run(job)
+        if on_page:
+            on_page(out[2] is None, out[3])        # (succeeded, was sent to the API)
+        return out
+
+    def _run(job):
         file, n, jpeg = job
         cached = raw_path(raw_dir, file, n)
         if cached.exists() and not force:
@@ -282,7 +288,14 @@ def cost_estimate(usage: dict, model: str) -> str:
 REQUEST_TIMEOUT = 60.0    # seconds per request; pages take ~7s (the SDK default is 10 minutes)
 
 
+COST_PER_PAGE = 0.035     # dollars, measured on the first real batch (51 pages, claude-opus-5-5): for estimates
+
+
 def make_client():
     import anthropic
+    from rc import settings
+    key = settings.api_key()
+    if not key:
+        raise ExtractionError("no Claude API key: add one in Settings (or run with op run --env-file=.env)")
     # a page normally takes well under a minute; a request that hangs is dropped and retried
-    return anthropic.Anthropic(max_retries=4, timeout=REQUEST_TIMEOUT)
+    return anthropic.Anthropic(api_key=key, max_retries=4, timeout=REQUEST_TIMEOUT)

@@ -75,7 +75,9 @@ except extraction (OCR), the review UI and the one-command runner.
 - `rc/workspace.py`   data folder (outside git, e.g. iCloud Drive): `<school year>/<month>/{scans,work,
   checkpoint.xlsx,certificates.pdf,summary.txt}`. **Totals never reset**: a month starts from the latest finished
   month in any school-year folder (year folders only keep things tidy), else the latest `<year>/start/` checkpoint.
-- `rc/matching.py`    sheet name + teacher -> student: exact / likely / ambiguous / none.
+- `rc/matching.py`    sheet name + teacher -> student: exact / likely / ambiguous / none. Built-in nickname
+  groups are global but never more than "likely"; names remembered in review ("Also called") count only when the
+  sheet's teacher is the child's own teacher.
 - `rc/extract.py`     reads scans with Claude vision (`claude-opus-5-5`) into `work/records.json`; every raw answer is
   cached in `work/raw/` so re-runs are free. Run as `op run --env-file=.env -- python -m rc --data D extract --month M`
   (`.env` holds only a 1Password reference). First measured cost: about $0.28 per 10 pages.
@@ -85,8 +87,22 @@ except extraction (OCR), the review UI and the one-command runner.
   suggestion (`review.suggest`) so the operator mostly presses Enter, or "Accept all suggestions". The month written
   on a sheet never blocks: the batch month is used and a mismatch is only shown (early next-month dates count). Nicknames: built-in groups (Rozzie/Rosalind) plus
   per-child "Also called" names remembered from review. Page text is only ever set with textContent (handwriting is untrusted).
+- `rc/review.py`      several sheets per child: taken in page order, each later one is add / replace / skip
+  (never "Accept all"); a child added as new is matchable from other sheets as `new@<sheet key>`.
 - `rc/review.py`      turns extracted sheet records + a person's decisions into entries; nothing is settled
   silently unless the name matches exactly and every field was read confidently. A student with no
   teacher must have one looked up by the operator (no automated source): `decide <sheet> --teacher X`.
 - Tests use made-up children only. Run with `.venv/bin/python -m pytest -q` (Python via `uv`, see below).
 - Python: the system `python3` shim is broken on this Mac; use `uv venv .venv && uv pip install -r requirements.txt`.
+
+## The app (`python -m rc app`, double-click "Reading Challenge" on a set-up Mac)
+For a non-programmer (Jamie): the whole month in the browser, no CLI. See `docs/mac-setup.md` (install) and
+`docs/how-to.md` (using it).
+- `rc/app.py` `Home`: month list and status, create month (refused while an earlier month is unfinished), add
+  scans (upload, written whole then renamed), read in a background thread with progress, reopen (outputs moved
+  to `<month>/reopened <time>/`; refused if a later month is finished). No HTTP in it.
+- `rc/home.html` home screen; `review_web.make_server(home=...)` serves it at `/` and each month's review at
+  `/review?m=YYYY-MM` (every API call carries `m`). `/ping` is for the launcher.
+- `rc/settings.py` data folder in `~/Library/Application Support/Reading Challenge/settings.json`; API key in the
+  Keychain via `keyring` (an env key, e.g. from `op run`, wins). Tests use a fake keyring: never the real one.
+- `tools/launch.sh` (port 8642, reuses a running copy, `git pull --ff-only` when possible), `tools/setup_mac.sh`.

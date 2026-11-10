@@ -1,5 +1,6 @@
 """Command line:  python -m rc <command> --data <folder> --month "October 2026" ...
 
+  app      everything below, in the browser (what the double-click app runs)
   start    create the month's folders and say where to put the scans
   check    list every open question about the scanned sheets (exit status 1 if any)
   extract  read the scanned sheets with Claude (run as: op run --env-file=.env -- python -m rc ... extract)
@@ -84,6 +85,12 @@ def cmd_extract(args):
     print('Next: python -m rc --data <folder> check --month "%s"' % ck.month_label(m.folder.month))
 
 
+def cmd_app(args):
+    from rc import app
+    home = app.Home(args.data or None)
+    review_web.serve_app(home, open_browser=not args.no_browser, port=args.port)
+
+
 def cmd_review(args):
     review_web.serve(_month(args), open_browser=not args.no_browser, port=args.port)
 
@@ -155,6 +162,10 @@ def main(argv=None):
     p.add_argument("--force", action="store_true", help="ask again even for pages already read")
     p.add_argument("--dry-run", action="store_true", help="render the pages and report sizes; no API calls")
     p.set_defaults(fn=cmd_extract)
+    p = sub.add_parser("app", help="the whole monthly job in your browser (no other commands needed)")
+    p.add_argument("--port", type=int, default=0)
+    p.add_argument("--no-browser", action="store_true")
+    p.set_defaults(fn=cmd_app)
     p = sub.add_parser("review", help="open the review screen in your browser")
     p.add_argument("--month", required=True)
     p.add_argument("--port", type=int, default=0, help="fixed port (default: any free one)")

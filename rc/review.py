@@ -11,6 +11,7 @@ apply. Nothing is ever settled silently except an exact name match with every fi
 
 Decisions, keyed by sheet ("<file>#<page>"):
     {"student": "S0003"}                          this sheet is that student
+    {"student": "new@oct.pdf#3"}                  the child added as new from that sheet this month
     {"remember_name": true}                       (with student) also match the name as written next time
     {"new_student": {"name":..., "teacher":..., "grade":..., "total": 0}}   add a student
     {"skip": "reason"}                            ignore this sheet
@@ -18,7 +19,11 @@ Decisions, keyed by sheet ("<file>#<page>"):
     {"pages_ok": true}                            the read page count is right (for low confidence)
     {"teacher": "Moren"}                          (with an existing student) their teacher now: fills a missing
                                                   teacher or records a class change
-    {"duplicate": "sum" | "skip"}                 a second sheet for a child already seen this month
+    {"duplicate": "sum" | "replace" | "skip"}     another sheet for a child already seen this month (page order):
+                                                  add its pages, use its pages instead, or ignore it
+
+A child can hand in several sheets in one month. Their sheets are taken in page order: the first one starts
+the month's count, and each later one says what to do with it, relative to the count so far.
 """
 from __future__ import annotations
 
@@ -61,7 +66,7 @@ class Issue:
     key: str
     kind: str                  # who | teacher | pages | month | duplicate
     message: str
-    candidates: tuple = ()     # matching.Candidate for 'who'; teacher names for 'teacher'
+    candidates: tuple = ()     # matching.Candidate for 'who'; teacher names for 'teacher'; (so far, this) for duplicate
 
 
 @dataclass
@@ -72,8 +77,11 @@ class Settled:
     remember_name: bool = False            # keep the name written on the sheet as one of this child's names
     new_student: dict | None = None        # to be added
     pages: int | None = None
-    skipped: str = ""
-    merged_from: list = field(default_factory=list)   # extra sheets summed into this one
+    skipped: str = ""                      # not counted on its own (skipped, or folded into another sheet)
+    merged: bool = False                   # skipped because its pages went into another sheet of the same child
+    own_pages: int | None = None           # this sheet's own pages (pages becomes the child's month count)
+    sources: list = field(default_factory=list)       # sheets whose pages make up this one's count (default: itself)
+    dup: dict | None = None                # for a later sheet of the same child: what the choice is between
     warnings: list = field(default_factory=list)      # shown to the person, never block (e.g. month on the sheet)
 
 
@@ -82,6 +90,10 @@ class Plan:
     settled: list[Settled]
     issues: list[Issue]
     matches: dict[str, mt.Match]
+    pending: dict = field(default_factory=dict)       # "new@<sheet>" -> ck.Student being added this month
+
+    def student(self, cp: ck.Checkpoint, sid: str) -> ck.Student | None:
+        return cp.students.get(sid) or self.pending.get(sid)
 
     @property
     def ready(self) -> bool:
@@ -161,17 +173,47 @@ def sheet_month_matches(written: str, batch: str) -> bool:
     return False
 
 
-def _identity(s: Settled, cp: ck.Checkpoint) -> str:
+NEW = "new@"
+
+
+def _pending_students(records, decisions) -> tuple[dict, dict]:
+    """Children being added as new this month, one per sheet that says so: ({"new@<key>": Student},
+    {"new@<key>": canonical id}). Two sheets that both add the same name and teacher are the same child."""
+    pending, canon, seen = {}, {}, {}
+    for rec in records:
+        d = decisions.get(rec.key, {})
+        n = d.get("new_student") if not d.get("skip") and "student" not in d else None
+        if not n:
+            continue
+        name = (n.get("name") or rec.name).strip()
+        if not name:
+            continue
+        sid = NEW + rec.key
+        teacher = (n.get("teacher") or "").strip()
+        pending[sid] = ck.Student(sid, name, teacher, str(n.get("grade", "") or ""), int(n.get("total", 0) or 0),
+                                  notes=f"new, from {rec.label}")
+        same = mt.normalize(name) + "|" + mt.normalize(teacher)
+        canon[sid] = seen.setdefault(same, sid)
+    return pending, canon
+
+
+def _identity(s: Settled, canon: dict) -> str:
     if s.student_id:
-        return s.student_id
-    n = s.new_student
-    return "new:" + mt.normalize(n["name"]) + "|" + mt.normalize(n.get("teacher", ""))
+        return canon.get(s.student_id, s.student_id)
+    return canon.get(NEW + s.record.key, NEW + s.record.key)
+
+
+def new_from(sid: str) -> str:
+    """'new@oct.pdf#3' -> 'oct.pdf#3' (the sheet the new child was added from)."""
+    return sid[len(NEW):] if sid.startswith(NEW) else ""
 
 
 def plan(records: list[SheetRecord], cp: ck.Checkpoint, batch_month: str, decisions: dict) -> Plan:
     batch = ck.month_key(batch_month)
     settled, issues, matches = [], [], {}
     teachers = sorted({s.teacher for s in cp.students.values() if s.teacher})
+    pending, canon = _pending_students(records, decisions)
+    labels = {r.key: r.label for r in records}
 
     for rec in records:
         d = decisions.get(rec.key, {})
@@ -181,15 +223,20 @@ def plan(records: list[SheetRecord], cp: ck.Checkpoint, batch_month: str, decisi
         item = Settled(rec)
 
         # who is this?
-        m = mt.match(rec.name, rec.teacher, cp)
+        m = mt.match(rec.name, rec.teacher, cp, [p for k, p in pending.items() if k != NEW + rec.key])
         matches[rec.key] = m
         if "student" in d:
-            if d["student"] not in cp.students:
-                issues.append(Issue(rec.key, "who", f"{rec.label}: decision names unknown student {d['student']}",
+            sid = d["student"]
+            if sid.startswith(NEW) and (sid not in pending or sid == NEW + rec.key):
+                was = labels.get(new_from(sid), new_from(sid))
+                issues.append(Issue(rec.key, "who", f"{rec.label}: this was the new student from {was}, "
+                                                    f"who is no longer being added; choose again", m.candidates))
+            elif not sid.startswith(NEW) and sid not in cp.students:
+                issues.append(Issue(rec.key, "who", f"{rec.label}: decision names unknown student {sid}",
                                     m.candidates))
             else:
-                item.student_id = d["student"]
-                item.remember_name = bool(d.get("remember_name"))
+                item.student_id = sid
+                item.remember_name = bool(d.get("remember_name")) and sid in cp.students
         elif "new_student" in d:
             n = dict(d["new_student"])
             n["name"] = (n.get("name") or rec.name).strip()
@@ -210,7 +257,9 @@ def plan(records: list[SheetRecord], cp: ck.Checkpoint, batch_month: str, decisi
                                                 f" - {why}", m.candidates))
 
         # a classroom is needed for the certificate: the operator has to look it up (no automated source)
-        if item.student_id and (d.get("teacher") or "").strip():
+        if item.student_id and item.student_id.startswith(NEW):
+            pass                                   # the class was chosen on the sheet that added them
+        elif item.student_id and (d.get("teacher") or "").strip():
             if d["teacher"].strip() != cp.students[item.student_id].teacher:
                 item.set_teacher = d["teacher"].strip()
         elif item.student_id and not cp.students[item.student_id].teacher.strip():
@@ -232,6 +281,7 @@ def plan(records: list[SheetRecord], cp: ck.Checkpoint, batch_month: str, decisi
                                     (f" ({rec.note})" if rec.note else "")))
         else:
             item.pages = rec.pages
+        item.own_pages = item.pages
         if item.pages is not None and item.pages < 0:
             issues.append(Issue(rec.key, "pages", f"{rec.label}: pages cannot be negative"))
 
@@ -240,31 +290,41 @@ def plan(records: list[SheetRecord], cp: ck.Checkpoint, batch_month: str, decisi
             item.warnings.append(f"sheet says {rec.month!r}; counted for {ck.month_label(batch)}")
         settled.append(item)
 
-    # two sheets for the same child
-    first: dict[str, Settled] = {}
+    # several sheets for the same child: page order; each later sheet adds to, replaces or skips the count so far
+    groups: dict[str, list[Settled]] = {}
     for item in settled:
-        if item.skipped or (item.student_id is None and item.new_student is None):
+        if not item.skipped and (item.student_id or item.new_student):
+            groups.setdefault(_identity(item, canon), []).append(item)
+    for ident, items in groups.items():
+        if len(items) < 2:
             continue
-        ident = _identity(item, cp)
-        if ident not in first:
-            first[ident] = item
-            continue
-        d = decisions.get(item.record.key, {})
-        choice = d.get("duplicate")
-        if choice == "sum":
-            if item.pages is not None and first[ident].pages is not None:
-                first[ident].pages += item.pages
-                first[ident].merged_from.append(item.record)
-            item.skipped = "summed into " + first[ident].record.label
-        elif choice == "skip":
-            item.skipped = "duplicate of " + first[ident].record.label
-        else:
-            who = cp.students[item.student_id].name if item.student_id else item.new_student["name"]
-            issues.append(Issue(item.record.key, "duplicate",
-                                f"{item.record.label}: {who} already has {first[ident].record.label} this month "
-                                f"({first[ident].pages} vs {item.pages} pages): add them together, or skip this one?",
-                                (first[ident].pages, item.pages)))
-    return Plan(settled, issues, matches)
+        holder = items[0]
+        count, sources = holder.pages, [holder.record]
+        known_as = cp.students.get(holder.student_id) or pending.get(holder.student_id or "")
+        who = known_as.name if known_as else holder.new_student["name"]
+        for item in items[1:]:
+            choice = decisions.get(item.record.key, {}).get("duplicate")
+            before = [r.label for r in sources]
+            known = count is not None and item.pages is not None
+            item.dup = {"others": before, "so_far": count, "this": item.pages,
+                        "sum": count + item.pages if known else None, "replace": item.pages}
+            if choice == "sum":
+                count = count + item.pages if known else None
+                sources.append(item.record)
+                item.skipped, item.merged = "added to " + holder.record.label, True
+            elif choice == "replace":
+                count, sources = item.pages, [item.record]
+                item.skipped, item.merged = "replaces " + ", ".join(before), True
+            elif choice == "skip":
+                item.skipped = "same sheet as " + ", ".join(before)
+            else:
+                issues.append(Issue(item.record.key, "duplicate",
+                                    f"{item.record.label}: {who} also has {', '.join(before)} this month "
+                                    f"({count if count is not None else '?'} pages so far, this sheet "
+                                    f"{item.pages if item.pages is not None else '?'}): add, replace, or skip?",
+                                    (count, item.pages)))
+        holder.pages, holder.sources = count, sources
+    return Plan(settled, issues, matches, pending)
 
 
 # ------------------------------------------------------------------ finishing
@@ -274,16 +334,22 @@ def finalize(p: Plan, cp: ck.Checkpoint, table=None) -> tuple[ck.Checkpoint, lis
         raise ck.CheckpointError(f"{len(p.issues)} question(s) still open; first: {p.issues[0].message}")
     cp = cp.copy()
     entries, notes, created = [], [], {}
+    canon = {}
+    for sid, st in p.pending.items():              # same name and teacher on two "new" sheets: one child
+        canon[sid] = next(o for o, ost in p.pending.items()
+                          if (mt.normalize(ost.name), mt.normalize(ost.teacher)) == (mt.normalize(st.name),
+                                                                                       mt.normalize(st.teacher)))
     for item in p.settled:
-        if item.student_id and item.remember_name and not item.skipped:
+        if item.student_id in cp.students and item.remember_name and not item.skipped:
             old = cp.students[item.student_id]
             written = item.record.name.strip()
             known = {mt.normalize(old.name)} | {mt.normalize(n) for n in old.nickname_list}
             if written and mt.normalize(written) not in known:
                 cp.students[old.id] = ck.replace(old, nicknames=", ".join(old.nickname_list + [written]))
-                notes.append(f"{old.name} will also be recognised as {written!r} ({item.record.label})")
+                notes.append(f"{old.name} will also be recognised as {written!r} in {old.teacher}'s class "
+                             f"({item.record.label})")
     for item in p.settled:
-        if item.student_id and item.set_teacher and not item.skipped:
+        if item.student_id in cp.students and item.set_teacher and not item.skipped:
             old = cp.students[item.student_id]
             cp.students[old.id] = ck.replace(old, teacher=item.set_teacher)
             change = f"changed from {old.teacher} to" if old.teacher else "set to"
@@ -291,19 +357,20 @@ def finalize(p: Plan, cp: ck.Checkpoint, table=None) -> tuple[ck.Checkpoint, lis
     for item in p.settled:
         rec = item.record
         if item.skipped:
-            notes.append(f"skipped {rec.label} ({rec.name or 'no name'}): {item.skipped}")
+            notes.append(f"{rec.label} ({rec.name or 'no name'}): {item.skipped}" if item.merged else
+                         f"skipped {rec.label} ({rec.name or 'no name'}): {item.skipped}")
             continue
         sid = item.student_id
-        if sid is None:
-            n = item.new_student
-            ident = _identity(item, cp)
+        if sid is None or sid.startswith(NEW):
+            ident = canon.get(sid or NEW + rec.key)
             if ident not in created:
-                s = ck.add_student(cp, n["name"], n["teacher"], str(n.get("grade", "")), int(n.get("total", 0) or 0),
-                                   notes=f"added {rec.label}")
+                n = p.pending[ident]
+                s = ck.add_student(cp, n.name, n.teacher, n.grade, n.total,
+                                   notes=f"added {p.pending[ident].notes.split('from ')[-1]}")
                 created[ident] = s.id
-                notes.append(f"new student {s.name} ({s.teacher}) from {rec.label}")
+                notes.append(f"new student {s.name} ({s.teacher}) from {s.notes[len('added '):]}")
             sid = created[ident]
-        source = ", ".join([rec.label] + [r.label for r in item.merged_from])
+        source = ", ".join(r.label for r in (item.sources or [rec]))
         entries.append(ck.Entry(sid, item.pages, source))
     return cp, entries, notes
 
@@ -315,6 +382,7 @@ class Suggestion:
     decision: dict | None     # accepting this as-is settles the sheet; None if a person must fill something in
     reasons: list             # short, plain reasons the sheet was not settled automatically
     draft: dict = field(default_factory=dict)   # the same suggestion, possibly incomplete, for pre-filling a form
+    needs_choice: bool = False  # complete, but only a person may accept it (never "Accept all"): extra sheets
 
 
 def teacher_guess(written: str, teachers) -> str:
@@ -343,9 +411,13 @@ def suggest(p: Plan, cp: ck.Checkpoint, decisions: dict) -> dict[str, Suggestion
         elif m and m.candidates:
             best = m.candidates[0]
             d["student"] = best.student.id
-            d["remember_name"] = not best.reason.startswith(("same name", "same words"))
+            # remember real nicknames and first names (in the child's class); a spelling-like match is
+            # usually a misreading, which is not worth remembering
+            d["remember_name"] = best.student.id in cp.students and best.reason.startswith(("nickname", "first name only"))
             others = [c for c in m.candidates[1:] if c.score >= best.score - 0.1]
             why = "name hard to read" if m.status == mt.EXACT else best.reason
+            if best.student.id.startswith(NEW):
+                why = f"added as new from {p.pending[best.student.id].notes.split('from ')[-1]}; {best.reason}"
             reasons.append(why + (f"; could also be {others[0].student.name}" if others else ""))
         else:
             d["new_student"] = {"name": rec.name, "teacher": guess, "grade": ""}
@@ -356,7 +428,7 @@ def suggest(p: Plan, cp: ck.Checkpoint, decisions: dict) -> dict[str, Suggestion
             if not d["new_student"]["name"]:
                 complete = False
                 reasons.append("type the child's name")
-        if "student" in d and d["student"] in cp.students and not cp.students[d["student"]].teacher and not d.get("teacher"):
+        if d.get("student") in cp.students and not cp.students[d["student"]].teacher and not d.get("teacher"):
             if guess:
                 d["teacher"] = guess
                 reasons.append(f"no teacher on file: using {guess} from the sheet")
@@ -371,11 +443,13 @@ def suggest(p: Plan, cp: ck.Checkpoint, decisions: dict) -> dict[str, Suggestion
                 d["pages"] = rec.pages
                 if "pages" in kinds:
                     reasons.append(f"page count unsure" + (f": {rec.note}" if rec.note else ""))
+        needs_choice = False
         if "duplicate" in kinds and "duplicate" not in d:
-            dup = next(i for i in issues if i.kind == "duplicate")
-            first_pages, this_pages = (dup.candidates + (None, None))[:2]
-            d["duplicate"] = "skip" if first_pages == this_pages else "sum"
-            reasons.append("second sheet for this child: " + ("looks like the same sheet twice, skip it"
-                                                                if d["duplicate"] == "skip" else "add the pages together"))
-        out[rec.key] = Suggestion(d if complete else None, reasons or [i.message for i in issues], d)
+            so_far, this = item.dup["so_far"], item.dup["this"]
+            d["duplicate"] = "skip" if so_far == this else "sum"
+            needs_choice = True
+            reasons.append(f"also has {', '.join(item.dup['others'])}: " +
+                           ("same total, probably the same sheet twice" if d["duplicate"] == "skip"
+                            else "add, replace or skip"))
+        out[rec.key] = Suggestion(d if complete else None, reasons or [i.message for i in issues], d, needs_choice)
     return out

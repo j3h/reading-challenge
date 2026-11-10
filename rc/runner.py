@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections import Counter
 
 import make_certificates as mc
+from rc import audit
 from rc import checkpoint as ck
 from rc import render
 from rc import review as rv
@@ -84,13 +85,19 @@ class Month:
         new_cp, results = ck.apply_month(cp_with_new, self.folder.month, entries, self.table)
         label = ck.month_label(self.folder.month)
 
+        rows = audit.sheet_rows(p, self.decisions(), results)
+        checked = audit.checks(self.records(), p, before, cp_with_new, new_cp, results, self.table)
+        spots = audit.spot_checks(rows, self.folder.month)
+
         self.folder.create()
         warnings: list[str] = []
         wsp.save_atomic(lambda tmp: warnings.extend(render.render_print_pdf(results, label, tmp, self.table)),
                         self.folder.certificates)
-        text = summary(label, why, before, new_cp, results, notes, warnings, self.table)
+        text = summary(label, why, before, new_cp, results, notes, warnings, self.table, audit.report(checked, spots))
         wsp.write_atomic(self.folder.summary, text)
-        wsp.save_atomic(lambda tmp: ck.save(new_cp, tmp, results, self.table), self.folder.checkpoint)
+        wsp.save_atomic(lambda tmp: ck.save(new_cp, tmp, results, self.table,
+                                            sheets=(audit.SHEET_COLS, [r.cells() for r in rows])),
+                        self.folder.checkpoint)
         return text
 
 
@@ -106,7 +113,7 @@ def describe_issues(p: rv.Plan) -> list[str]:
     return lines
 
 
-def summary(label, source, before, after, results, notes, warnings, table) -> str:
+def summary(label, source, before, after, results, notes, warnings, table, checks=()) -> str:
     new_ids = set(after.students) - set(before.students)
     prizes = Counter()
     for r in results:
@@ -117,6 +124,8 @@ def summary(label, source, before, after, results, notes, warnings, table) -> st
            f"Started from: {source}",
            f"Certificates: {len(results)}   Classrooms: {len(ck.classrooms(results))}   "
            f"New students: {len(new_ids)}   Pages read: {sum(r.pages for r in results):,}", ""]
+    if checks:
+        out += list(checks) + [""]
     out.append("Prizes to hand out" + ("" if prizes else ": none"))
     order = {}
     for threshold, _, prize in table:
