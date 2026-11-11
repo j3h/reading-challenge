@@ -14,6 +14,7 @@ The data folder can also come from the READING_CHALLENGE_DATA environment variab
 import argparse
 import os
 import sys
+from pathlib import Path
 
 from rc import checkpoint as ck
 from rc import extract
@@ -127,7 +128,8 @@ def cmd_decide(args):
 
 def cmd_finish(args):
     m = _month(args)
-    text = m.finish()
+    from rc import settings
+    text = m.finish(who=settings.who(args.who or ""))
     print(text)
     print(f"Wrote {m.folder.certificates}\n      {m.folder.summary}\n      {m.folder.checkpoint}")
 
@@ -144,12 +146,19 @@ def cmd_import(args):
             sys.exit('a workbook needs --through, the last month to include, e.g. --through "September 2026"')
         aliases = dict(a.split("=", 1) for a in args.teacher_alias if "=" in a)
         keep = ck.load(args.keep_ids) if args.keep_ids else None
-        cp, report = import_workbook.parse_workbook(args.pdf, args.through, aliases, keep)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        wsp.save_atomic(lambda tmp: ck.save(cp, tmp), out)
-        print(f"Wrote {out}")
+        from rc import events as ev
+        log = ev.EventLog(wsp_.root)
+        if any(e.kind == "student_added" for e in log.read()):
+            sys.exit(f"{log.dir} already has students in it: the opening import is done. Make changes with "
+                     f"'adjust' instead (or move the events folder aside to start the log again)")
+        events, report = import_workbook.opening_events(args.pdf, args.through, _who(args), aliases, keep)
+        state = log.append(events)
+        _write_snapshot(state, out)
+        print(f"Recorded {len(events)} events in {log.own_file}\nWrote {out}")
         for line in report:
             print("  -", line)
+        for w in state.warnings:
+            print("  ! ", w)
         return
     extra = (["--questions", args.questions] if args.questions else [])
     for a in args.teacher_alias:
@@ -157,14 +166,113 @@ def cmd_import(args):
     import_master.main([args.pdf, "--out", str(out)] + extra)
 
 
+def _who(args) -> str:
+    from rc import settings
+    name = settings.who(getattr(args, "who", "") or "")
+    if not name:
+        sys.exit("Say who is making this change: --who NAME (or save a name in the app's Settings)")
+    return name
+
+
+def _write_snapshot(state, out):
+    wsp.save_atomic(lambda tmp: ck.save(state.to_checkpoint(), tmp), out)
+
+
+def _find_student(state, text):
+    from rc import matching as mt
+    if text in state.students:
+        return state.students[text]
+    hits = [s for s in state.students.values() if mt.normalize(s.name) == mt.normalize(text)]
+    if len(hits) != 1:
+        sys.exit(f"no single student called {text!r}" + (f" ({len(hits)} found; use the id)" if hits else ""))
+    return hits[0]
+
+
+def cmd_history(args):
+    from rc import events as ev
+    log = ev.EventLog(_data(args).root)
+    state = log.state()
+    s = _find_student(state, args.student)
+    print(f"{s.name} ({s.id}), {s.teacher or 'no teacher'}, grade {s.grade or '?'}: {s.total:,} pages now")
+    for e, live in log.timeline(s.id):
+        src = ev._source_text(e) if e.sources else ""
+        mark = "   " if live else " x "
+        print(f"{mark}{e.time[:16]}  {e.describe()}" + (f"  [{src}]" if src and src != e.kind else "")
+              + f"  ({e.who}, id {e.id[:8]})" + ("" if live else "  CANCELLED"))
+    for p in log.problems() + state.warnings:
+        print("  ! ", p)
+
+
+def cmd_adjust(args):
+    from rc import events as ev
+    log = ev.EventLog(_data(args).root)
+    state = log.state()
+    who, why = _who(args), (args.reason or "").strip()
+    manual = ({"manual": True},)
+    new = []
+    if args.void:
+        hit = [e for e in state.events if e.id.startswith(args.void)]
+        if len(hit) != 1:
+            sys.exit(f"no single event starting with {args.void!r}")
+        new.append(ev.Event("event_voided", {"event": hit[0].id}, who, why, manual))
+    else:
+        s = _find_student(state, args.student) if args.student else None
+        if s is None:
+            sys.exit("say which student: --student NAME or ID")
+        for kind, field, value in (("teacher_set", "teacher", args.teacher), ("grade_set", "grade", args.grade),
+                                   ("name_set", "name", args.name)):
+            if value is not None:
+                new.append(ev.Event(kind, {"student": s.id, field: value.strip()}, who, why, manual))
+        if args.pages is not None:
+            if not args.month:
+                sys.exit("--pages needs --month (which month the correction belongs to)")
+            new.append(ev.Event("pages_adjusted", {"student": s.id, "month": ck.month_key(args.month), "delta": args.pages},
+                                who, why, manual))
+        if args.total is not None:
+            new.append(ev.Event("total_set", {"student": s.id, "total": args.total}, who, why, manual))
+        if args.note:
+            new.append(ev.Event("note_added", {"student": s.id, "text": args.note}, who, why, manual))
+    if not new:
+        sys.exit("nothing to change: give --teacher, --grade, --name, --pages/--month, --total, --note or --void")
+    state = log.append(new)
+    for e in new:
+        print("Recorded:", e.describe())
+    if args.snapshot:
+        _write_snapshot(state, Path(args.snapshot))
+        print("Wrote", args.snapshot)
+
+
+def cmd_reopen(args):
+    from rc import app
+    home = app.Home(_data(args).root)
+    if args.who:
+        os.environ["READING_CHALLENGE_WHO"] = args.who
+    home.reopen(args.month, args.reason or "")
+    print(f"Reopened {ck.month_label(args.month)}: its events are cancelled (still in the log) and its files are in "
+          f"a 'reopened ...' folder")
+
+
+def cmd_snapshot(args):
+    from rc import events as ev
+    state = ev.EventLog(_data(args).root).state()
+    _write_snapshot(state, Path(args.out))
+    print(f"Wrote {args.out}: {len(state.students)} students, {len(state.events)} events")
+    for w in state.warnings:
+        print("  ! ", w)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m rc", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data", help="data folder (outside git; e.g. in iCloud Drive)")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name, fn in (("start", cmd_start), ("check", cmd_check), ("finish", cmd_finish)):
+    for name, fn in (("start", cmd_start), ("check", cmd_check), ("finish", cmd_finish), ("reopen", cmd_reopen)):
         p = sub.add_parser(name)
         p.add_argument("--month", required=True, help='e.g. "October 2026"')
+        if name in ("finish", "reopen"):
+            p.add_argument("--who", help="your name, recorded in the event log")
+        if name == "reopen":
+            p.add_argument("--reason", help="why it is being reopened")
         p.set_defaults(fn=fn)
     p = sub.add_parser("extract", help="read the scanned sheets with Claude (needs the API key: see rc/extract.py)")
     p.add_argument("--month", required=True)
@@ -207,7 +315,28 @@ def main(argv=None):
     p.add_argument("--teacher-alias", action="append", default=[], metavar="OLD=NEW",
                    help='use NEW wherever the master says OLD, e.g. "Biello/Tanner=Biello" (repeatable)')
     p.add_argument("--replace", action="store_true")
+    p.add_argument("--who", help="your name, recorded on every event")
     p.set_defaults(fn=cmd_import)
+    p = sub.add_parser("history", help="everything that happened to one student, with where it came from")
+    p.add_argument("student", help="name or id")
+    p.set_defaults(fn=cmd_history)
+    p = sub.add_parser("adjust", help="record a correction (needs --reason)")
+    p.add_argument("--student", help="name or id")
+    p.add_argument("--teacher")
+    p.add_argument("--grade")
+    p.add_argument("--name")
+    p.add_argument("--pages", type=int, help="add (or with a minus sign remove) pages, for --month")
+    p.add_argument("--month", help='the month the correction belongs to, e.g. "September 2026"')
+    p.add_argument("--total", type=int, help="set the running total outright")
+    p.add_argument("--note")
+    p.add_argument("--void", metavar="EVENT_ID", help="cancel an event (id from 'history')")
+    p.add_argument("--reason", help="why (required for pages, totals and cancelling)")
+    p.add_argument("--who")
+    p.add_argument("--snapshot", metavar="CHECKPOINT", help="also rewrite this checkpoint from the events")
+    p.set_defaults(fn=cmd_adjust)
+    p = sub.add_parser("snapshot", help="write a checkpoint workbook from the event log")
+    p.add_argument("out")
+    p.set_defaults(fn=cmd_snapshot)
     args = ap.parse_args(argv)
     try:
         args.fn(args)

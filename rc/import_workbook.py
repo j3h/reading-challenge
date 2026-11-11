@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 from rc import checkpoint as ck
 from rc import matching as mt
@@ -70,6 +71,7 @@ class MonthRow:
     prev: int | None
     cur: int | None
     grand: int | None
+    row: int = 0                # row number on its tab (for pointing back at it)
 
 
 def _columns(header) -> dict:
@@ -122,6 +124,75 @@ def month_end(rows: list[MonthRow]) -> tuple[int | None, int, str]:
 
 def parse_workbook(path, through: str, teacher_aliases=None, keep_ids: ck.Checkpoint | None = None):
     """(checkpoint as of the end of `through`, report lines)."""
+    children, report, _ = _read(path, through, teacher_aliases, keep_ids)
+    cp = ck.Checkpoint(month=ck.month_key(through))
+    for c in children:
+        cp.students[c["id"]] = ck.Student(c["id"], c["name"], c["teacher"], c["grade"], c["total"],
+                                          notes="; ".join(c["notes"]))
+        for title, month, start, end, rows, _ in c["history"]:
+            cp.history.append(ck.HistoryRow(month, c["id"], end - start, end, f"master: {title}"))
+    return cp, report
+
+
+def opening_events(path, through: str, who: str, teacher_aliases=None, keep_ids: ck.Checkpoint | None = None):
+    """(events, report): the workbook as the first events in the log, every child's month-by-month history
+    back to the first tab, each event pointing at its tab and row. Where the tabs do not add up (a child who
+    arrives with a total, a gap between tabs, PRIMARY disagreeing) a `total_set` says so, with the reason.
+
+    Times are the months the reading happened (the 28th, noon), so replaying puts history in order and
+    before anything recorded live. Prizes up to each child's opening total are recorded as handed out."""
+    from rc import events as ev
+    import make_certificates as mc
+    import datetime as dt
+    children, report, meta = _read(path, through, teacher_aliases, keep_ids)
+    wb_name = Path(path).name
+    through = ck.month_key(through)
+    table = mc.load_levels()
+
+    def at(month, step=0, tab_index=0):
+        y, m = (int(x) for x in month.split("-"))
+        t = dt.datetime(y, m, 28, 12, tzinfo=dt.timezone.utc) + dt.timedelta(minutes=tab_index, seconds=step)
+        return t.isoformat(timespec="seconds")
+
+    def src(tab, rows):
+        return tuple({"workbook": wb_name, "tab": tab, "row": r} for r in rows)
+
+    out = []
+    end_time = at(through, 59, 59)
+    for c in children:
+        sid = c["id"]
+        first = c["history"][0][1] if c["history"] else through
+        out.append(ev.Event("student_added", {"student": sid, "name": c["name"], "teacher": c["teacher"],
+                                              "grade": c["grade"]}, who, "", src(ROSTER_TAB, [c["row"]]),
+                            at(first, 0, -1)))
+        running = 0
+        for title, month, start, end, rows, i in c["history"]:
+            if start != running:
+                why = (f"arrives in {title} with {start:,} pages already" if running == 0 else
+                       f"{title} starts at {start:,} but the previous tab ended at {running:,}")
+                out.append(ev.Event("total_set", {"student": sid, "total": start}, who, why, src(title, rows),
+                                    at(month, 0, i)))
+            if end != start:
+                out.append(ev.Event("pages_recorded", {"student": sid, "month": month, "pages": end - start}, who,
+                                    "", src(title, rows), at(month, 1, i)))
+            running = end
+        if c["total"] != running:
+            why = "; ".join(n for n in c["notes"] if "PRIMARY said" in n) or \
+                f"{ROSTER_TAB} total (on no month tab)"
+            out.append(ev.Event("total_set", {"student": sid, "total": c["total"]}, who, why,
+                                src(ROSTER_TAB, [c["row"]]), end_time))
+        for note in c["notes"]:
+            out.append(ev.Event("note_added", {"student": sid, "text": note}, who, "", src(ROSTER_TAB, [c["row"]]),
+                                end_time))
+        given = [t for t, _, _ in table if t <= c["total"]]
+        if given:
+            out.append(ev.Event("prizes_given", {"student": sid, "month": through, "levels": given}, who,
+                                "assumed handed out before the app (from the workbook)", (), end_time))
+    return out, report
+
+
+def _read(path, through, teacher_aliases, keep_ids):
+    """[child dicts], report lines, meta: everything both views of the import need."""
     import openpyxl
     through = ck.month_key(through)
     aliases = {k.strip().lower(): v.strip() for k, v in (teacher_aliases or {}).items()}
@@ -144,11 +215,11 @@ def parse_workbook(path, through: str, teacher_aliases=None, keep_ids: ck.Checkp
         header = [c.value for c in ws[1]]
         cols = _columns(header)
         out: dict[str, list[MonthRow]] = {}
-        for _, cells in gen:
+        for row, cells in gen:
             get = lambda i: cells[i] if i is not None and i < len(cells) else None
             out.setdefault(_key(str(cells[0])), []).append(
                 MonthRow(str(cells[0]).strip(), str(get(1) or "").strip(), _num(get(cols["prev"])),
-                         _num(get(cols["cur"])), _num(get(cols["grand"]))))
+                         _num(get(cols["cur"])), _num(get(cols["grand"])), row[0].row))
         return out
 
     tabs = [(t, k, read_tab(t)) for t, k in used]
@@ -163,28 +234,29 @@ def parse_workbook(path, through: str, teacher_aliases=None, keep_ids: ck.Checkp
         teacher = str(cells[1] or "").strip()
         roster.append((str(cells[0]).strip(), aliases.get(teacher.lower(), teacher),
                        _grade(cells[cols["grade"]] if cols["grade"] is not None else ""),
-                       _num(cells[cols["prev"]]), red))
+                       _num(cells[cols["prev"]]), red, row[0].row))
 
-    cp = ck.Checkpoint(month=through)
+    cp = ck.Checkpoint(month=through)              # only to hand out ids
+    children = []
     old_ids = {}
     if keep_ids is not None:
         for s in keep_ids.students.values():
             old_ids.setdefault(_key(s.name), []).append(s.id)
     report, seen = [], {}
     through_title = next(t for t, k in used if k == through)
-    for name, teacher, grade, primary, red in roster:
+    for name, teacher, grade, primary, red, prow in roster:
         key = _key(name)
         if key in seen:
             report.append(f"{name}: on {ROSTER_TAB} twice; only the first row is used")
             continue
         notes, total, history, source = [], None, [], ""
-        for title, month, tab in tabs:
+        for i, (title, month, tab) in enumerate(tabs):
             if key in tab:
                 end, pages, problem = month_end(tab[key])
                 if end is None:
                     continue
                 total, source = end, title
-                history.append((month, pages, end, title))
+                history.append((title, month, end - pages, end, [r.row for r in tab[key]], i))
                 if problem and month == through:
                     notes.append(f"{title}: {problem}")
         if total is None:
@@ -204,13 +276,11 @@ def parse_workbook(path, through: str, teacher_aliases=None, keep_ids: ck.Checkp
             report.append(f"{name}: no teacher in {ROSTER_TAB}")
         ids = old_ids.get(key, [])
         sid = ids[0] if len(ids) == 1 and ids[0] not in cp.students else None
-        s = ck.Student(sid or "", name, teacher, grade, total, notes="; ".join(notes))
-        if not sid:
-            s = ck.replace(s, id=_next_free(cp, keep_ids))
-        cp.students[s.id] = s
-        seen[key] = s.id
-        for month, pages, end, title in history:
-            cp.history.append(ck.HistoryRow(month, s.id, pages, end, f"master: {title}"))
+        sid = sid or _next_free(cp, keep_ids)
+        cp.students[sid] = ck.Student(sid, name, teacher)
+        seen[key] = sid
+        children.append({"id": sid, "name": name, "teacher": teacher, "grade": grade, "total": total,
+                         "notes": notes, "history": history, "row": prow, "primary": primary})
         for n in notes:
             if "check" in n or "do not chain" in n or "already includes" in n:
                 report.append(f"{name}: {n}")
@@ -220,7 +290,7 @@ def parse_workbook(path, through: str, teacher_aliases=None, keep_ids: ck.Checkp
         report.append(f"{gone} children on month tabs are not on {ROSTER_TAB} (archived or left); not imported")
     report.insert(0, f"Totals as of the end of {through_title}, from {len(tabs)} month tabs "
                      f"({tabs[0][0]} to {through_title}); {len(cp.students)} students")
-    return cp, report
+    return children, report, {"through_title": through_title}
 
 
 def _next_free(cp: ck.Checkpoint, keep: ck.Checkpoint | None) -> str:

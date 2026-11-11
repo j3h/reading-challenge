@@ -375,8 +375,9 @@ function renderFinished() {
     el("pre", { class: "summary" }, state.summary));
 }
 async function reopen() {
-  if (!confirm("Reopen " + state.month + "? Its certificates, summary and checkpoint are moved into a dated folder, and you can change any sheet and finish again.")) return;
-  try { await api("/api/home/reopen", { month: MONTH }); } catch (e) { return fail(e.message); }
+  const reason = prompt("Reopen " + state.month + "? Its certificates, summary and checkpoint are moved into a dated folder, its changes are cancelled in the history (they stay visible), and you can change any sheet and finish again.\n\nWhy? (kept in the history)");
+  if (reason === null) return;
+  try { await api("/api/home/reopen", { month: MONTH, reason }); } catch (e) { return fail(e.message); }
   location.reload();
 }
 

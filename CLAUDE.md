@@ -99,6 +99,21 @@ except extraction (OCR), the review UI and the one-command runner.
 - Tests use made-up children only. Run with `.venv/bin/python -m pytest -q` (Python via `uv`, see below).
 - Python: the system `python3` shim is broken on this Mac; use `uv venv .venv && uv pip install -r requirements.txt`.
 
+## Event log (`rc/events.py`, in progress: steps 1-2 of 5 done)
+Every change is an append-only event with who/when/which Mac, a reason, and `sources` pointing at the evidence
+(scan page, photo, form row, workbook tab+row, or manual). State = replay in time order; checkpoint.xlsx is a
+snapshot (`python -m rc snapshot OUT`). One file per Mac in `<data>/events/<device>.jsonl` (temp file + rename),
+merged on read, so iCloud never sees two versions of one file. Duplicates: same id always; same content only for
+additive events tied to a document (manual corrections and set-a-value events are never merged by content).
+Fix mistakes with new events (`adjust --reason`, `--void ID`), never by editing. `history NAME` shows a child's
+timeline. `import-master x.xlsx` writes the opening events (history back to 2021, `total_set` where tabs do not add
+up, prizes up to the opening total recorded as handed out, so `State.owed()` lists only new ones).
+In a folder with a log, a month starts from the replay (`Month.previous`) and `finish(who=...)` appends one batch
+(month_finished, new students, teacher changes, also-called names, pages_recorded and prizes_given, each pointing at
+its sheet) after checking that the replay gives the same totals; `reopen` voids that batch. Folders without a log
+still use checkpoint files. Still to do: form responses as review sheets, child timeline + Adjust form in the app,
+prizes owed on cover pages, raw-data retention.
+
 ## The app (`python -m rc app`, double-click "Reading Challenge" on a set-up Mac)
 For a non-programmer (Jamie): the whole month in the browser, no CLI. See `docs/mac-setup.md` (install) and
 `docs/how-to.md` (using it).

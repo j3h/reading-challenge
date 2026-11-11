@@ -103,6 +103,7 @@ async function load() {
 function settingsCard(force) {
   const key = el("input", { type: "password", placeholder: "sk-ant-…", autocomplete: "off", size: 36 });
   const path = el("input", { value: state.data_folder, placeholder: "/Users/…/Reading Challenge", size: 50 });
+  const whoInput = el("input", { value: state.who || "", placeholder: "e.g. Jamie", size: 24 });
   const keyText = { environment: "Using the key from the command line (1Password).", keychain: "Saved in this Mac's Keychain.", "": "Not set yet." }[state.api_key];
   return el("div", { class: "card" + (force ? " warn" : "") }, el("h2", {}, "Settings"),
     el("h3", {}, "Data folder"),
@@ -111,6 +112,10 @@ function settingsCard(force) {
       state.mac ? el("button", { class: state.folder_ok ? "" : "primary", onclick: () => act("/api/home/folder", { choose: true }) }, "Choose folder…") : null,
       path, el("button", { onclick: () => act("/api/home/folder", { path: path.value }) }, "Use this path")),
     state.folder_ok ? null : el("p", { class: "bad" }, state.data_folder ? "That folder can't be found." : "No folder chosen yet."),
+    el("h3", {}, "Your name"),
+    el("p", { class: "muted" }, "Recorded on every change you make (finishing a month, corrections), so anyone can see later who did what."),
+    el("div", { class: "row" }, whoInput,
+      el("button", { class: state.who ? "" : "primary", onclick: () => act("/api/home/who", { name: whoInput.value }) }, state.who ? "Change" : "Save name")),
     el("h3", {}, "Claude API key"),
     el("p", { class: "muted" }, "Used to read the scanned sheets (about 3½ cents a page). It is kept in the Mac's Keychain, not in a file."),
     el("p", {}, keyText),
@@ -132,12 +137,12 @@ function monthCard(m, open) {
   const cls = (i) => (at > i ? "done" : at === i ? "now" : "");
   const review = () => location.href = "/review?m=" + encodeURIComponent(m.key);
 
-  const fileInput = el("input", { type: "file", accept: ".pdf,.jpg,.jpeg,.png,.tif,.tiff", multiple: true, hidden: true,
+  const fileInput = el("input", { type: "file", accept: ".pdf,.jpg,.jpeg,.png,.tif,.tiff,.webp,.heic,.heif", multiple: true, hidden: true,
     onchange: (e) => upload(m.key, [...e.target.files]) });
   const scansWhat = m.scans.length ? `${m.scans.length} file${m.scans.length > 1 ? "s" : ""}, ${fmt(m.pages)} pages` : "No scans yet";
   const steps = el("div", { class: "steps" },
     step("1 · Scans", cls(0), uploading === m.key ? "Adding…" : scansWhat, fileInput,
-      m.finished ? null : el("button", { class: at === 0 ? "primary" : "", onclick: () => fileInput.click() }, "Add scan PDF…"),
+      m.finished ? null : el("button", { class: at === 0 ? "primary" : "", onclick: () => fileInput.click() }, "Add scans or photos…"),
       el("button", { onclick: () => act("/api/home/finder", { month: m.key, what: "scans" }) }, "Show in Finder")),
     step("2 · Read", cls(1),
       reading ? el("div", {}, `${job.done} of ${job.total} pages`, el("div", { class: "bar" }, el("div", { style: `width:${job.total ? 100 * job.done / job.total : 0}%` })))
@@ -183,9 +188,9 @@ async function upload(month, files) {
 // ---------------------------------------------------------------- page
 function render() {
   const app = $("app");
-  if (!state.folder_ok || !state.api_key) {
+  if (!state.folder_ok || !state.api_key || !state.who) {
     app.replaceChildren(el("div", { class: "card" }, el("h2", {}, "Welcome"),
-      el("p", {}, "Two things to set up once: where the data folder is, and the key for reading the scans.")), settingsCard(true),
+      el("p", {}, "Three things to set up once: where the data folder is, your name, and the key for reading the scans.")), settingsCard(true),
       ...(state.folder_ok ? months() : []));
   } else {
     app.replaceChildren(...(showSettings ? [settingsCard(false)] : []), ...months());

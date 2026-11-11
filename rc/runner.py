@@ -12,6 +12,7 @@ from collections import Counter
 import make_certificates as mc
 from rc import audit
 from rc import checkpoint as ck
+from rc import events as ev
 from rc import render
 from rc import review as rv
 from rc import workspace as wsp
@@ -29,11 +30,29 @@ class Month:
         self.table = table or mc.load_levels()
         self.records_path = self.folder.work / RECORDS
         self.decisions_path = self.folder.work / DECISIONS
+        self.log = ev.EventLog(workspace.root)
 
     # ---- inputs
+    def uses_events(self) -> bool:
+        """A data folder with an event log keeps everything there; older folders use checkpoint files."""
+        return self.log.has_students()
+
     def previous(self) -> tuple[ck.Checkpoint, str]:
-        path, why = self.ws.previous_checkpoint(self.folder.month, self.folder.season)
-        return (ck.load(path) if path else ck.Checkpoint()), why
+        if not self.uses_events():
+            path, why = self.ws.previous_checkpoint(self.folder.month, self.folder.season)
+            return (ck.load(path) if path else ck.Checkpoint()), why
+        state = self.log.state()
+        month = self.folder.month
+        if month in state.finished:
+            raise ck.CheckpointError(f"{ck.month_label(month)} is already finished in the event log; reopen it to "
+                                     f"change it")
+        later = sorted(m for m in state.finished if m > month)
+        if later:
+            raise ck.CheckpointError(f"{ck.month_label(month)} is older than the already finished "
+                                     f"{ck.month_label(later[0])}; reopen that month first")
+        cp = state.to_checkpoint()
+        cp.month = max((h.month for h in cp.history if h.month < month), default=None)
+        return cp, f"the event log ({len(state.events)} events, as of now)"
 
     def records(self) -> list[rv.SheetRecord]:
         if not self.records_path.exists():
@@ -73,8 +92,12 @@ class Month:
         rv.save_decisions(decisions, self.decisions_path, source)
 
     # ---- finishing
-    def finish(self) -> str:
-        """Write certificates.pdf, summary.txt and (last) checkpoint.xlsx. Returns the summary text."""
+    def finish(self, who: str = "") -> str:
+        """Write certificates.pdf and summary.txt, record the month in the event log (when the folder has one),
+        then checkpoint.xlsx last. Returns the summary text."""
+        events_mode = self.uses_events()
+        if events_mode and not who.strip():
+            raise ck.CheckpointError("say who is finishing the month (your name in Settings, or --who)")
         p = self.plan()
         if not p.ready:
             raise ck.CheckpointError(f"{len(p.issues)} question(s) still open; run 'check' to list them")
@@ -88,6 +111,14 @@ class Month:
         rows = audit.sheet_rows(p, self.decisions(), results)
         checked = audit.checks(self.records(), p, before, cp_with_new, new_cp, results, self.table)
         spots = audit.spot_checks(rows, self.folder.month)
+        events = month_events(p, before, cp_with_new, results, self.folder.month, who) if events_mode else []
+        if events_mode:                       # the log, replayed, must say exactly what this month computed
+            replayed = ev.replay(self.log.read() + events)
+            bad = [r.student.name for r in results if replayed.students[r.student.id].total != r.student.total]
+            checked.append((not bad and not replayed.warnings,
+                            "the event log, replayed, gives the same totals" +
+                            (f" (differs for: {', '.join(bad)})" if bad else "") +
+                            (f" (warnings: {'; '.join(replayed.warnings)})" if replayed.warnings else "")))
 
         self.folder.create()
         warnings: list[str] = []
@@ -95,10 +126,86 @@ class Month:
                         self.folder.certificates)
         text = summary(label, why, before, new_cp, results, notes, warnings, self.table, audit.report(checked, spots))
         wsp.write_atomic(self.folder.summary, text)
+        if events_mode:
+            if not all(ok for ok, _ in checked):
+                raise ck.CheckpointError("the checks failed (see summary.txt); nothing was recorded in the event log")
+            new_cp = self.log.append(events).to_checkpoint()
         wsp.save_atomic(lambda tmp: ck.save(new_cp, tmp, results, self.table,
                                             sheets=(audit.SHEET_COLS, [r.cells() for r in rows])),
                         self.folder.checkpoint)
         return text
+
+
+def reopen_month(m: "Month", who: str, reason: str = "") -> int:
+    """Cancel the events a month's finish recorded (event_voided, one per event, same reason). Returns how many.
+    Refused while a later month is finished: it started from this month's totals."""
+    state = m.log.state()
+    month = m.folder.month
+    fin = state.finished.get(month)
+    if fin is None:
+        return 0
+    later = sorted(k for k in state.finished if k > month)
+    if later:
+        raise ck.CheckpointError(f"{ck.month_label(later[0])} was finished after this month and started from its "
+                                 f"totals; reopen that one first")
+    if not who.strip():
+        raise ck.CheckpointError("say who is reopening the month (your name in Settings, or --who)")
+    why = f"reopened {ck.month_label(month)}" + (f": {reason.strip()}" if reason.strip() else "")
+    targets = [e for e in state.events if e.batch == fin.batch and e.id not in state.voided]
+    m.log.append([ev.Event("event_voided", {"event": e.id}, who, why, ({"manual": True},)) for e in targets])
+    return len(targets)
+
+
+def month_events(p: rv.Plan, before: ck.Checkpoint, with_new: ck.Checkpoint, results, month: str,
+                 who: str) -> list[ev.Event]:
+    """What finishing a month adds to the log, each change pointing at the sheet(s) it came from. All share one
+    batch id (the month_finished event's), so reopening the month cancels exactly these."""
+    import datetime as dt
+    start = dt.datetime.now().astimezone()
+    # events apply in time order, so each gets its own moment, in the order written (a new student before
+    # their pages)
+    tick = lambda: (start + dt.timedelta(microseconds=len(out))).isoformat(timespec="microseconds")
+    out: list[ev.Event] = []
+    finish = ev.Event("month_finished", {"month": month, "sheets": len(p.settled)}, who, "", (), tick())
+    batch = finish.id
+    out.append(ev.Event(finish.kind, finish.data, who, "", (), finish.time, "", finish.id, batch))
+    mk = lambda kind, data, src, reason="": out.append(ev.Event(kind, data, who, reason, tuple(src),
+                                                                tick(), "", batch=batch))
+    src_of = lambda rec: ev.sheet_source(rec.file, rec.page)
+    added = set()
+    for item in p.settled:
+        rec = item.record
+        sid = p.resolved.get(rec.key)
+        if not sid or item.skipped:
+            continue
+        if sid not in before.students and sid not in added:
+            s = with_new.students[sid]
+            mk("student_added", {"student": sid, "name": s.name, "teacher": s.teacher, "grade": s.grade},
+               [src_of(r) for r in (item.sources or [rec])], "new this month")
+            added.add(sid)
+        if item.set_teacher and sid in before.students:
+            mk("teacher_set", {"student": sid, "teacher": item.set_teacher}, [src_of(rec)],
+               f"sheet says {rec.teacher!r}")
+        if item.remember_name and sid in before.students:
+            known = {mt_norm(before.students[sid].name)} | {mt_norm(n) for n in before.students[sid].nickname_list}
+            if rec.name.strip() and mt_norm(rec.name) not in known:
+                mk("also_called_added", {"student": sid, "name": rec.name.strip()}, [src_of(rec)])
+    by_student = {r.student.id: r for r in results}
+    for item in p.settled:
+        sid = p.resolved.get(item.record.key)
+        if sid and not item.skipped and sid in by_student:
+            r = by_student[sid]
+            mk("pages_recorded", {"student": sid, "month": month, "pages": r.pages},
+               [src_of(x) for x in (item.sources or [item.record])])
+            if r.prizes:
+                mk("prizes_given", {"student": sid, "month": month, "levels": [t for t, _, _ in r.prizes]},
+                   [src_of(x) for x in (item.sources or [item.record])])
+    return out
+
+
+def mt_norm(name: str) -> str:
+    from rc import matching as mt
+    return mt.normalize(name)
 
 
 def describe_issues(p: rv.Plan) -> list[str]:

@@ -26,7 +26,7 @@ from rc import runner
 from rc import settings
 from rc import workspace as wsp
 
-SCAN_EXTS = {".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff"}
+SCAN_EXTS = wsp.SCAN_EXTS | wsp.PHOTO_EXTS
 MAX_UPLOAD = 500 * 1024 * 1024          # a month's scan is ~50 MB
 MONTH_DIR = re.compile(r"\d{4}-\d{2}")
 
@@ -82,6 +82,13 @@ class Home:
         self.root, self._reviews = p, {}
         return self.state()
 
+    def set_who(self, name: str) -> dict:
+        name = " ".join(str(name).split())
+        if not name:
+            raise ck.CheckpointError("type your name: it is recorded on every change you make")
+        settings.save({"who": name})
+        return self.state()
+
     def choose_data_folder(self) -> dict:
         """Ask with the Mac's own folder picker (a browser page cannot see folder paths)."""
         if sys.platform != "darwin":
@@ -106,6 +113,8 @@ class Home:
     def month_status(self, key: str) -> dict:
         m = self.month(key)
         f = m.folder
+        if f.scans.is_dir() and not f.is_finished():
+            f.convert_photos()                      # photos dropped in with Finder
         scans = [{"name": p.name, "pages": self._page_count(p), "mb": round(p.stat().st_size / 1e6, 1)}
                  for p in f.scan_files()]
         pages = sum(s["pages"] for s in scans)
@@ -150,6 +159,7 @@ class Home:
 
     def state(self) -> dict:
         out = {"data_folder": str(self.root) if self.root else "", "folder_ok": bool(self.root and self.root.is_dir()),
+               "who": settings.who(),
                "api_key": settings.api_key_source(), "months": [], "suggested": "", "job": self.job.as_dict()
                if self.job else None, "mac": sys.platform == "darwin"}
         if out["folder_ok"]:
@@ -178,7 +188,7 @@ class Home:
         """Save an uploaded scan into the month's scans folder (written whole, then renamed into place)."""
         name = Path(name or "").name.strip()
         if not name or name.startswith(".") or Path(name).suffix.lower() not in SCAN_EXTS:
-            raise ck.CheckpointError("scans must be PDF or picture files (.pdf, .jpg, .png, .tif)")
+            raise ck.CheckpointError("scans must be PDF or picture files (.pdf, .jpg, .png, .tif, .webp, .heic)")
         if length <= 0 or length > MAX_UPLOAD:
             raise ck.CheckpointError("that file is empty or too big")
         f = self.month(month).folder.create()
@@ -207,6 +217,7 @@ class Home:
             tmp.replace(target)
         finally:
             tmp.unlink(missing_ok=True)
+        f.convert_photos()
         return self.state()
 
     def start_reading(self, month: str, client=None) -> dict:
@@ -247,8 +258,9 @@ class Home:
         threading.Thread(target=work, daemon=True).start()
         return self.state()
 
-    def reopen(self, month: str) -> dict:
-        """Undo 'finish': move the month's outputs into a dated folder beside them. Decisions are kept."""
+    def reopen(self, month: str, reason: str = "") -> dict:
+        """Undo 'finish': cancel the month's events in the log (with who and why), and move its outputs into a
+        dated folder beside them. Review decisions are kept."""
         m = self.month(month)
         f = m.folder
         if not f.is_finished():
@@ -257,6 +269,8 @@ class Home:
         if later:
             raise ck.CheckpointError(f"{ck.month_label(later[0])} was finished after this month and started from "
                                      f"its totals; reopen that one first")
+        if m.uses_events():
+            runner.reopen_month(m, settings.who(), reason)
         aside = f.path / ("reopened " + dt.datetime.now().strftime("%Y-%m-%d %H.%M.%S"))
         aside.mkdir()
         for p in (f.checkpoint, f.certificates, f.summary):      # checkpoint first: the month is open again

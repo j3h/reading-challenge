@@ -91,6 +91,7 @@ class Plan:
     issues: list[Issue]
     matches: dict[str, mt.Match]
     pending: dict = field(default_factory=dict)       # "new@<sheet>" -> ck.Student being added this month
+    resolved: dict = field(default_factory=dict)      # set by finalize: sheet key -> student id it counted for
 
     def student(self, cp: ck.Checkpoint, sid: str) -> ck.Student | None:
         return cp.students.get(sid) or self.pending.get(sid)
@@ -372,6 +373,7 @@ def finalize(p: Plan, cp: ck.Checkpoint, table=None) -> tuple[ck.Checkpoint, lis
             sid = created[ident]
         source = ", ".join(r.label for r in (item.sources or [rec]))
         entries.append(ck.Entry(sid, item.pages, source))
+        p.resolved[rec.key] = sid
     return cp, entries, notes
 
 

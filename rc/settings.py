@@ -43,6 +43,11 @@ def data_folder() -> Path | None:
     return Path(folder).expanduser() if folder else None
 
 
+def who(override: str = "") -> str:
+    """The name recorded on every change (asked once in Settings; --who or READING_CHALLENGE_WHO override)."""
+    return (override or os.environ.get("READING_CHALLENGE_WHO") or load().get("who") or "").strip()
+
+
 # ---------------------------------------------------------------------------- API key
 def _keyring():
     import keyring

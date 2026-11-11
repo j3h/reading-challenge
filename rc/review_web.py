@@ -161,8 +161,9 @@ class ReviewApp:
         return self.state()
 
     def finish(self) -> dict:
+        from rc import settings
         with self._lock:
-            self.month.finish()
+            self.month.finish(who=settings.who())
         return self.state()
 
     # the month's finished files, by the name the page uses: (path, content type)
@@ -350,7 +351,9 @@ def make_server(app: ReviewApp | None = None, port: int = 0, home=None) -> tuple
             if action == "read":
                 return home.start_reading(month)
             if action == "reopen":
-                return home.reopen(month)
+                return home.reopen(month, str(body.get("reason", "")))
+            if action == "who":
+                return home.set_who(str(body.get("name", "")))
             if action == "finder":
                 home.show_in_finder(month or None, str(body.get("what", "folder")))
                 return home.state()

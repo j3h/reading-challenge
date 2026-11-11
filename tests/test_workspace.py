@@ -122,3 +122,23 @@ def test_icloud_placeholders_are_found(tmp_path):
     (tmp_path / "2026-27").mkdir()
     (tmp_path / "2026-27" / ".checkpoint.xlsx.icloud").write_bytes(b"")
     assert [p.name for p in ws.cloud_placeholders(tmp_path)] == [".checkpoint.xlsx.icloud"]
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="uses the Mac's sips")
+def test_emailed_photos_become_jpegs_and_the_original_is_kept(tmp_path):
+    import pymupdf
+    import subprocess
+    mf = ws.Workspace(tmp_path).month_folder("2026-10").create()
+    png = mf.scans / "x.png"
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 40, 30), False)
+    pix.set_rect(pix.irect, (200, 100, 50))
+    pix.save(png)
+    subprocess.run(["sips", "-s", "format", "heic", str(png), "--out", str(mf.scans / "photo.heic")],
+                   capture_output=True, check=False)
+    png.unlink()
+    if not (mf.scans / "photo.heic").exists():
+        pytest.skip("this Mac's sips cannot write HEIC")
+    assert mf.convert_photos() == ["photo.jpg"]
+    assert [p.name for p in mf.scan_files()] == ["photo.jpg"] and (mf.scans / "originals" / "photo.heic").exists()
+    assert pymupdf.Pixmap(str(mf.scans / "photo.jpg")).width == 40
+    assert mf.convert_photos() == []                     # nothing left to do

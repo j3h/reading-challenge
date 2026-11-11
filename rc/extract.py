@@ -208,6 +208,7 @@ def raw_path(raw_dir: Path, file: str, page: int) -> Path:
 def extract_month(client, month_folder: wsp.MonthFolder, model: str = DEFAULT_MODEL, dpi: int = DEFAULT_DPI,
                   pages: str | None = None, force: bool = False, workers: int = 4, log=print, on_page=None):
     """Read every scan in the month folder. Returns (records, dropped, usage); writes work/records.json."""
+    month_folder.convert_photos()
     files = month_folder.scan_files()
     if not files:
         raise ck.CheckpointError(f"no scans in {month_folder.scans}")

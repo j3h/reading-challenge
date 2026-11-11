@@ -35,6 +35,8 @@ SEASON_START_MONTH = 7   # July: a school-year folder runs July..June
 CHECKPOINT = "checkpoint.xlsx"
 CERTIFICATES = "certificates.pdf"
 SUMMARY = "summary.txt"
+SCAN_EXTS = {".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff"}
+PHOTO_EXTS = {".webp", ".heic", ".heif"}        # emailed or phone photos: converted to JPEG on the way in
 
 
 def season_for(month: str, start_month: int = SEASON_START_MONTH) -> str:
@@ -83,8 +85,12 @@ class MonthFolder:
         return self.checkpoint.exists()
 
     def scan_files(self) -> list[Path]:
-        exts = {".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff"}
-        return sorted(p for p in self.scans.glob("*") if p.suffix.lower() in exts and not p.name.startswith("."))
+        return sorted(p for p in self.scans.glob("*") if p.suffix.lower() in SCAN_EXTS and not p.name.startswith("."))
+
+    def convert_photos(self) -> list[str]:
+        """Turn .webp/.heic photos in scans/ into JPEGs the rest of the program can read (macOS `sips`).
+        The original moves to scans/originals/. Returns the new file names."""
+        return convert_photos(self.scans)
 
 
 class Workspace:
@@ -131,6 +137,33 @@ class Workspace:
         if starts:
             return self.start_checkpoint(starts[-1]), f"starting checkpoint in {starts[-1]}/start"
         return None, "no earlier checkpoint: this is the first month"
+
+
+def convert_photos(folder) -> list[str]:
+    import shutil
+    import subprocess
+    import sys
+    folder = Path(folder)
+    photos = sorted(p for p in folder.glob("*") if p.suffix.lower() in PHOTO_EXTS and not p.name.startswith("."))
+    done = []
+    for src in photos:
+        if sys.platform != "darwin":
+            raise ck.CheckpointError(f"{src.name}: convert .webp/.heic photos to JPEG first (only automatic on a Mac)")
+        target = folder / (src.stem + ".jpg")
+        n = 2
+        while target.exists():
+            target, n = folder / f"{src.stem} ({n}).jpg", n + 1
+        tmp = folder / f".{target.name}.converting.jpg"
+        result = subprocess.run(["sips", "-s", "format", "jpeg", "-s", "formatOptions", "90", str(src), "--out", str(tmp)],
+                                capture_output=True, text=True)
+        if result.returncode != 0 or not tmp.exists():
+            tmp.unlink(missing_ok=True)
+            raise ck.CheckpointError(f"could not convert {src.name} to JPEG: {result.stderr.strip() or 'sips failed'}")
+        tmp.replace(target)
+        (folder / "originals").mkdir(exist_ok=True)
+        shutil.move(str(src), folder / "originals" / src.name)
+        done.append(target.name)
+    return done
 
 
 def write_atomic(path, data: bytes | str) -> None:
