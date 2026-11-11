@@ -44,8 +44,7 @@ class ReviewApp:
         if m.folder.is_finished():
             return {"finished": True, "month": ck.month_label(m.folder.month),
                     "summary": m.folder.summary.read_text(encoding="utf-8") if m.folder.summary.exists() else "",
-                    "files": {"certificates": str(m.folder.certificates), "class_lists": str(m.folder.class_lists),
-                              "summary": str(m.folder.summary),
+                    "files": {"certificates": str(m.folder.certificates), "summary": str(m.folder.summary),
                               "checkpoint": str(m.folder.checkpoint)}}
         cp, source = m.previous()
         plan = m.plan()
@@ -171,7 +170,6 @@ class ReviewApp:
     def output(self, name: str) -> tuple[Path, str]:
         f = self.month.folder
         files = {"certificates.pdf": (f.certificates, "application/pdf"),
-                 "class-lists.pdf": (f.class_lists, "application/pdf"),
                  "summary.txt": (f.summary, "text/plain; charset=utf-8"),
                  "checkpoint.xlsx": (f.checkpoint,
                                      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}

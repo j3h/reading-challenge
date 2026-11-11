@@ -67,14 +67,14 @@ def test_a_clean_month_finishes_and_writes_everything(data, capsys):
 
     certs = pymupdf.open(mf.certificates)
     texts = [p.get_text().replace("\xa0", " ") for p in certs]
-    # 2 per letter sheet, each class on its own sheets: Lopez (1 child) then Park (2 children) = 2 sheets
-    assert len(texts) == 2 and certs[0].rect.width == 612 and certs[0].rect.height == 792
-    assert "Ada Example" in texts[0] and "Lopez  ·  1 of 1" in texts[0]
-    assert "Io Li" in texts[1] and "Sam Sample" in texts[1] and "Park  ·  2 of 2" in texts[1]
-    lists = pymupdf.open(mf.class_lists)
-    assert lists.page_count == 1
-    lt = lists[0].get_text().replace("\xa0", " ")
+    # page 1: class lists; then 2 per letter sheet, each class on its own sheets: Lopez (1 child), Park (2) = 2 sheets
+    assert len(texts) == 3 and all(p.rect.width == 612 and p.rect.height == 792 for p in certs)
+    lt = texts[0]
     assert "Prizes to pull from stock" in lt and lt.index("Lopez") < lt.index("Park") and "Io Li" in lt
+    assert "Ada Example" in texts[1] and "Lopez  ·  1 of 1" in texts[1]
+    assert "Io Li" in texts[2] and "Sam Sample" in texts[2] and "Park  ·  2 of 2" in texts[2]
+    assert [t for _, t, _ in certs.get_toc()] == ["Class lists for bagging", "Lopez (1)", "Park (2)"]
+    assert not mf.class_lists.exists()
 
     summary = mf.summary.read_text()
     assert "Certificates: 3" in summary and "Absent Al (Lopez)" in summary

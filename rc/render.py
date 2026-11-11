@@ -1,4 +1,8 @@
-"""The print PDF: for each classroom, a cover page (checklist for bagging prizes) then its certificates.
+"""The print files. Finishing a month writes `render_print_file`: the class lists for bagging (all classes, as few
+pages as possible), then the certificates two to a letter sheet, cut-and-stack by class. `render_print_pdf` below is
+the older one-certificate-per-page layout with a cover page per class, kept for reference and its tests.
+
+Older layout: for each classroom, a cover page (checklist for bagging prizes) then its certificates.
 
 All pages are letter landscape, like the certificates, so the whole file prints in one orientation.
 Classrooms are in alphabetical order by teacher; children alphabetical within, on the cover page and
@@ -217,9 +221,35 @@ def cut_and_stack(n: int) -> list[tuple[int, int | None]]:
 
 def render_certificates_2up(results, month, out_path, table=None) -> list[str]:
     """Write certificates two to a letter sheet, class by class, laid out for a paper cutter. Returns warnings."""
+    warnings: list[str] = []
+    out, toc = _certificates_doc(results, month, table, warnings)
+    _save(out, toc, out_path)
+    return warnings
+
+
+def _save(doc, toc, out_path):
+    if toc:
+        doc.set_toc(toc)
+    doc.subset_fonts()
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    doc.save(str(out_path), garbage=4, deflate=True)
+
+
+def render_print_file(results, month, out_path, table=None, owed_rows=()) -> list[str]:
+    """The one file to print: the class lists for bagging first (pull those pages off before cutting), then the
+    certificates two to a sheet, each class on its own sheets, cut and stack. Returns warnings."""
+    warnings: list[str] = []
+    doc = _class_lists_doc(results, month, owed_rows, warnings)
+    lists = doc.page_count
+    certs, toc = _certificates_doc(results, month, table, warnings)
+    doc.insert_pdf(certs)
+    _save(doc, [[1, "Class lists for bagging", 1]] + [[lv, title, page + lists] for lv, title, page in toc], out_path)
+    return warnings
+
+
+def _certificates_doc(results, month, table, warnings):
     table = table or mc.load_levels()
     label = ck.month_label(ck.month_key(month))
-    warnings: list[str] = []
     singles = pymupdf.open()                       # each certificate on its own page first, exactly as designed
     runs = []
     for teacher, rs in ck.classrooms(results):
@@ -245,12 +275,7 @@ def render_certificates_2up(results, month, out_path, table=None) -> list[str]:
                 sheet.insert_text((CERT_X / 2 + 3, y0 + CERT_H / 2 + 60), tag, fontsize=7, color=GREY, rotate=90)
             for x0, x1 in ((18, 42), (SHEET_W - 42, SHEET_W - 18)):     # where to cut
                 sheet.draw_line((x0, HALF_H), (x1, HALF_H), color=GREY, width=0.5)
-    if toc:
-        out.set_toc(toc)
-    out.subset_fonts()
-    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    out.save(str(out_path), garbage=4, deflate=True)
-    return warnings
+    return out, toc
 
 
 # ---------------------------------------------------------------------------- the class lists, all together
@@ -262,11 +287,17 @@ LIST_SIZE, LIST_LINE = 8.0, 9.1
 
 
 def render_class_lists(results, month, out_path, owed_rows=()) -> list[str]:
+    """Write the class lists alone (see `_class_lists_doc`). Returns warnings."""
+    warnings: list[str] = []
+    _save(_class_lists_doc(results, month, owed_rows, warnings), [], out_path)
+    return warnings
+
+
+def _class_lists_doc(results, month, owed_rows, warnings):
     """Every class's bagging list on as few letter pages as possible (two columns), with the whole school's prize
     count first, for pulling prizes from stock. Prizes owed from earlier months are included, marked "(owed)"."""
     label = ck.month_label(ck.month_key(month))
     doc = pymupdf.open()
-    warnings: list[str] = []
     owed = {s.id: lv for s, lv in owed_rows}
     classes = dict(ck.classrooms(results))
     for s, _ in owed_rows:
@@ -346,9 +377,6 @@ def render_class_lists(results, month, out_path, owed_rows=()) -> list[str]:
                 y += LIST_LINE
             state["y"] = y + 2
         state["y"] += 5
-    doc.subset_fonts()
-    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    doc.save(str(out_path), garbage=4, deflate=True)
     if doc.page_count > 1:
         warnings.append(f"class lists take {doc.page_count} pages")
-    return warnings
+    return doc

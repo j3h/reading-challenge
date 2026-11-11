@@ -137,11 +137,9 @@ class Month:
 
         self.folder.create()
         warnings: list[str] = []
-        # certificates two to a letter sheet (cut and stack, by class); the class lists for bagging separately
-        wsp.save_atomic(lambda tmp: warnings.extend(render.render_certificates_2up(results, label, tmp, self.table)),
+        # one file to print: the class lists for bagging, then the certificates two to a sheet (cut and stack)
+        wsp.save_atomic(lambda tmp: warnings.extend(render.render_print_file(results, label, tmp, self.table, owed_rows)),
                         self.folder.certificates)
-        wsp.save_atomic(lambda tmp: warnings.extend(render.render_class_lists(results, label, tmp, owed_rows)),
-                        self.folder.class_lists)
         text = summary(label, why, before, new_cp, results, notes, warnings, self.table, audit.report(checked, spots),
                        owed_rows)
         wsp.write_atomic(self.folder.summary, text)
@@ -183,10 +181,10 @@ def reprint(m: "Month") -> list[str]:
     owed_rows = [(state.students[sid], [level[t] for t in sorted(lv) if t in level]) for sid, lv in owed_levels.items()]
     label = ck.month_label(month)
     warnings: list[str] = []
-    wsp.save_atomic(lambda tmp: warnings.extend(render.render_certificates_2up(results, label, tmp, m.table)),
+    wsp.save_atomic(lambda tmp: warnings.extend(render.render_print_file(results, label, tmp, m.table, owed_rows)),
                     m.folder.certificates)
-    wsp.save_atomic(lambda tmp: warnings.extend(render.render_class_lists(results, label, tmp, owed_rows)),
-                    m.folder.class_lists)
+    if m.folder.class_lists.exists():          # the lists used to be a separate file; now they're page 1
+        m.folder.class_lists.unlink()
     return warnings
 
 

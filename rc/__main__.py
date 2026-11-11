@@ -234,7 +234,7 @@ def cmd_reopen(args):
 def cmd_reprint(args):
     m = _month(args)
     warnings = runner.reprint(m)
-    print(f"Rewrote {m.folder.certificates}\n        {m.folder.class_lists}")
+    print(f"Rewrote {m.folder.certificates}")
     for w in warnings:
         print("  -", w)
 
