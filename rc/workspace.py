@@ -175,6 +175,18 @@ def convert_photos(folder) -> list[str]:
     return done
 
 
+def _unhide(path: Path) -> None:
+    """The temporary file has a dot name; in a synced folder macOS can mark it hidden (UF_HIDDEN), and the flag
+    survives the rename, so Finder would not show the finished file. Clear it."""
+    import stat
+    try:
+        flags = os.stat(path).st_flags
+        if flags & stat.UF_HIDDEN:
+            os.chflags(path, flags & ~stat.UF_HIDDEN)
+    except (AttributeError, OSError):          # no file flags on this system: nothing to clear
+        pass
+
+
 def write_atomic(path, data: bytes | str) -> None:
     """Write via a temp file in the same folder, then rename (sync clients see only the finished file)."""
     path = Path(path)
@@ -185,6 +197,7 @@ def write_atomic(path, data: bytes | str) -> None:
         with os.fdopen(fd, mode, **kwargs) as fh:
             fh.write(data)
         os.replace(tmp, path)
+        _unhide(path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
@@ -199,6 +212,7 @@ def save_atomic(save_fn, path) -> None:
     try:
         save_fn(tmp)
         os.replace(tmp, path)
+        _unhide(path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise

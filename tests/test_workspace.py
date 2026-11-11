@@ -1,4 +1,5 @@
 """Folders on disk: school years, months, previous checkpoint (rolling forward), safe writes."""
+import os
 import sys
 from pathlib import Path
 
@@ -142,3 +143,19 @@ def test_emailed_photos_become_jpegs_and_the_original_is_kept(tmp_path):
     assert [p.name for p in mf.scan_files()] == ["photo.jpg"] and (mf.scans / "originals" / "photo.heic").exists()
     assert pymupdf.Pixmap(str(mf.scans / "photo.jpg")).width == 40
     assert mf.convert_photos() == []                     # nothing left to do
+
+
+
+@pytest.mark.skipif(not hasattr(os, "chflags"), reason="no file flags here")
+def test_a_finished_file_is_never_left_hidden_from_finder(tmp_path, monkeypatch):
+    import stat
+    real_replace = os.replace
+
+    def replace_and_hide(src, dst):            # what a sync folder can do to the dot-named temporary file
+        os.chflags(src, os.stat(src).st_flags | stat.UF_HIDDEN)
+        real_replace(src, dst)
+    monkeypatch.setattr(ws.os, "replace", replace_and_hide)
+    ws.write_atomic(tmp_path / "summary.txt", "hi")
+    ws.save_atomic(lambda tmp: Path(tmp).write_text("pdf"), tmp_path / "class-lists.pdf")
+    for name in ("summary.txt", "class-lists.pdf"):
+        assert not os.stat(tmp_path / name).st_flags & stat.UF_HIDDEN
