@@ -292,6 +292,10 @@ def make_server(app: ReviewApp | None = None, port: int = 0, home=None) -> tuple
             try:
                 if url.path == "/api/home" and home is not None:
                     return self._json(200, home.state())
+                if url.path == "/api/home/students" and home is not None:
+                    return self._json(200, home.students())
+                if url.path == "/api/home/student" and home is not None:
+                    return self._json(200, home.student(query["id"][0]))
                 if url.path == "/api/state":
                     return self._json(200, review_for(query).state())
                 if url.path == "/crop":
@@ -354,6 +358,8 @@ def make_server(app: ReviewApp | None = None, port: int = 0, home=None) -> tuple
                 return home.reopen(month, str(body.get("reason", "")))
             if action == "who":
                 return home.set_who(str(body.get("name", "")))
+            if action == "adjust":
+                return home.adjust(str(body.get("student", "")), dict(body.get("change") or {}))
             if action == "finder":
                 home.show_in_finder(month or None, str(body.get("what", "folder")))
                 return home.state()

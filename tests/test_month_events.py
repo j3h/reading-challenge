@@ -17,11 +17,15 @@ TABLE = mc.load_levels()
 WB = {"workbook": "master.xlsx", "tab": "September 2026", "row": 2}
 
 
-def opening(sid, name, teacher, total):
+def opening(sid, name, teacher, total, not_given=()):
+    """Like the workbook import: added, opening total, and every prize up to it handed out (except `not_given`)."""
+    given = [t for t, _, _ in TABLE if t <= total and t not in not_given]
     return [ev.Event("student_added", {"student": sid, "name": name, "teacher": teacher, "grade": "2"}, "Josh", "",
                      (WB,), "2026-09-28T12:00:00+00:00"),
             ev.Event("total_set", {"student": sid, "total": total}, "Josh", "opening balance", (WB,),
-                     "2026-09-28T12:00:01+00:00")]
+                     "2026-09-28T12:00:01+00:00")] + \
+        ([ev.Event("prizes_given", {"student": sid, "month": "2026-09", "levels": given}, "Josh", "assumed", (),
+                   "2026-09-28T12:00:02+00:00")] if given else [])
 
 
 @pytest.fixture
@@ -56,7 +60,7 @@ def test_a_month_starts_from_the_log_and_finishing_records_it(data):
     text = m.finish(who="Jamie")
     assert "Checks: all passed" in text and "the event log, replayed, gives the same totals" in text
     st = m.log.state()
-    assert st.students["S0002"].total == 2550 and st.prizes_given["S0002"] == {2500}
+    assert st.students["S0002"].total == 2550 and 2500 in st.prizes_given["S0002"]
     zed = next(s for s in st.students.values() if s.name == "Zed Newcomer")
     kinds = [(e.kind, e.sources) for e in st.by_student[zed.id]]
     assert kinds[0] == ("student_added", ({"scan": "oct.pdf", "page": 2},)) and kinds[1][0] == "pages_recorded"
@@ -79,7 +83,7 @@ def test_a_correction_after_finishing_carries_into_the_next_month(data):
     nov.finish(who="Jamie")
     st = log.state()
     assert st.students["S0001"].total == 504
-    assert sorted(st.prizes_given["S0001"]) == [100, 500]      # Oct 74 -> 104 crossed 100, Nov 404 -> 504 crossed 500
+    assert sorted(st.prizes_given["S0001"]) == [1, 100, 500]   # opening 74 had 1; Oct crossed 100, Nov 500
 
 
 def test_reopening_cancels_exactly_that_months_events_and_it_can_be_finished_again(data):
@@ -92,7 +96,7 @@ def test_reopening_cancels_exactly_that_months_events_and_it_can_be_finished_aga
     assert runner.reopen_month(nov, "Jamie", "wrong scan") == 2          # month_finished + pages_recorded
     assert runner.reopen_month(oct_, "Jamie") == 3                       # ... + prizes_given (crossed 100)
     st = ev.EventLog(data).state()
-    assert st.students["S0001"].total == 74 and not st.finished and not st.prizes_given
+    assert st.students["S0001"].total == 74 and not st.finished and st.prizes_given["S0001"] == {1}   # opening only
     cancels = [e for e in st.events if e.kind == "event_voided"]
     assert len(cancels) == 5 and all(e.who == "Jamie" for e in cancels)
     assert sum("wrong scan" in e.reason for e in cancels) == 2 and sum(e.reason == "reopened October 2026" for e in cancels) == 3
@@ -129,3 +133,23 @@ def test_folders_without_a_log_still_work_from_checkpoint_files(tmp_path):
     assert not m.uses_events()
     m.finish()
     assert ck.load(m.folder.checkpoint).students["S0001"].total == 104 and not (tmp_path / "events").exists()
+
+
+def test_prizes_owed_from_earlier_are_bagged_and_recorded(tmp_path):
+    import pymupdf
+    data = tmp_path
+    log = ev.EventLog(data, "jamies-mac")
+    # Io Li reached 2,500 before October, but the Pen was never handed out
+    log.append(opening("S0001", "Ada Example", "Lopez", 74) + opening("S0002", "Io Li", "Park", 2600, not_given=(2500,)))
+    m = month(data, "2026-10", [rec("oct.pdf", 1, "Ada Example", "Lopez", 30)])
+    text = m.finish(who="Jamie")
+    assert "owed from earlier months" in text and "Io Li: " in text and "Pen (2,500)" in text
+    st = log.state()
+    assert not st.owed(TABLE)                                       # everything owed is now handed out
+    given = [e for e in st.by_student["S0002"] if e.kind == "prizes_given" and "owed from earlier" in e.reason]
+    assert len(given) == 1 and given[0].data["levels"] == [2500] and given[0].batch
+    pdf = pymupdf.open(m.folder.certificates)
+    cover_text = "".join(pdf[i].get_text() for i in range(pdf.page_count))
+    assert "Pen (owed)" in cover_text and "Park" in cover_text       # Io's class gets a cover page with no sheets
+    runner.reopen_month(m, "Jamie")                                 # reopening un-gives them
+    assert ev.EventLog(data).state().owed(TABLE)

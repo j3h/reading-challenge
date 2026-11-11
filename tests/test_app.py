@@ -227,3 +227,38 @@ def test_a_new_month_waits_until_earlier_months_are_finished(data):
     assert st["suggested"] == "" and st["unfinished"] == ["October 2026"]
     with pytest.raises(ck.CheckpointError, match="finish October 2026 first"):
         home.create_month("2026-11")
+
+
+def test_students_page_lists_shows_history_and_records_corrections(tmp_path, monkeypatch):
+    from rc import events as ev
+    data = tmp_path / "evdata"
+    data.mkdir()
+    log = ev.EventLog(data, "mac")
+    src = ({"workbook": "m.xlsx", "tab": "Sept", "row": 7},)
+    log.append([ev.Event("student_added", {"student": "S0001", "name": "Ada Example", "teacher": "Lopez", "grade": "2"},
+                         "Josh", "", src, "2026-09-28T12:00:00+00:00"),
+                ev.Event("pages_recorded", {"student": "S0001", "month": "2026-09", "pages": 120}, "Josh", "", src,
+                         "2026-09-28T12:00:01+00:00")])
+    home = app_mod.Home(data)
+    people = home.students()
+    assert people["students"][0]["name"] == "Ada Example" and people["students"][0]["owed"] == ["Bookmark", "Pencil and Stickers"]
+    with pytest.raises(ck.CheckpointError, match="name in Settings"):
+        home.adjust("S0001", {"teacher": "Park", "reason": "moved"})
+    settings.save({"who": "Jamie"})
+    with pytest.raises(ck.CheckpointError, match="say why"):
+        home.adjust("S0001", {"teacher": "Park"})
+    got = home.adjust("S0001", {"teacher": "Park", "grade": "2", "name": "Ada Example", "pages": -20, "month": "2026-09",
+                                "reason": "a book was counted twice"})
+    assert got["student"]["teacher"] == "Park" and got["student"]["total"] == 100
+    newest = got["timeline"][0]
+    assert newest["who"] == "Jamie" and newest["sources"] == ["by hand"] and newest["reason"] == "a book was counted twice"
+    assert [e["text"].split(" - ")[0] for e in got["timeline"]][:2] == ["September 2026: pages -20", "teacher set to Park"]
+    first = got["timeline"][-1]
+    assert first["sources"] == ["m.xlsx: Sept row 7"]
+    wrong = next(e for e in got["timeline"] if e["kind"] == "pages_adjusted")
+    got = home.adjust("S0001", {"void": wrong["id"], "reason": "it was not counted twice after all"})
+    assert got["student"]["total"] == 120
+    crossed = next(e for e in got["timeline"] if e["id"] == wrong["id"])
+    assert crossed["cancelled"] and crossed["cancelled_by"] == "Jamie" and "after all" in crossed["cancel_reason"]
+    with pytest.raises(ck.CheckpointError, match="nothing to change"):
+        home.adjust("S0001", {"teacher": "Park", "reason": "same as before"})

@@ -63,9 +63,11 @@ def _wrap_name(t, name, width, size):
     return lines, size
 
 
-def prize_tally(results) -> list[tuple[str, int]]:
-    """[(prize item, how many to bag)] in the order of the levels table (smallest prize first)."""
+def prize_tally(results, owed_rows=()) -> list[tuple[str, int]]:
+    """[(prize item, how many to bag)] in the order of the levels table (smallest prize first). `owed_rows`:
+    [(student, [(threshold, label, prize)])] crossed in an earlier month but never handed out."""
     counts = Counter(p[2] for r in results for p in r.prizes)
+    counts.update(p[2] for _, levels in owed_rows for p in levels)
     order = {}
     for threshold, _, prize in mc.load_levels():
         order.setdefault(prize, threshold)
@@ -86,8 +88,11 @@ def _fit(t, key, text, size, min_size, width):
     return size if w <= width else max(min_size, size * width / w)
 
 
-def draw_cover_pages(doc, teacher, results, month, warn) -> int:
-    """Append the cover page(s) for one classroom. Returns how many pages were added."""
+def draw_cover_pages(doc, teacher, results, month, warn, owed_rows=()) -> int:
+    """Append the cover page(s) for one classroom. Returns how many pages were added. Prizes owed from an earlier
+    month are bagged too: added to the tally, marked "(owed)" by the child, with a row for an owed child who has no
+    sheet this month."""
+    owed = {s.id: levels for s, levels in owed_rows}
     pages_added = 0
     page = None
     t = None
@@ -110,7 +115,7 @@ def draw_cover_pages(doc, teacher, results, month, warn) -> int:
 
     y = new_page(True)
 
-    tally = prize_tally(results)
+    tally = prize_tally(results, owed_rows)
     if tally:
         text = ", ".join(f"{n} × {item}" for item, n in tally)
         _text(t, MARGIN, y, "Prizes to bag for this class", 12)
@@ -132,9 +137,11 @@ def draw_cover_pages(doc, teacher, results, month, warn) -> int:
         return y + 5 + 4
 
     y = header(y)
-    for r in results:
+    seen = {r.student.id for r in results}
+    extra = [ck.Result(s, None, s.total, ()) for s, _ in owed_rows if s.id not in seen]
+    for r in sorted(list(results) + extra, key=lambda r: r.student.name.lower()):
         s = r.student
-        items = [p[2] for p in r.prizes]
+        items = [p[2] for p in r.prizes] + [f"{p[2]} (owed)" for p in owed.get(s.id, [])]
         lines = _wrap_items(t, items, PRIZE_W, SIZE) if items else ["—"]
         name_lines, name_size = _wrap_name(t, s.name, NAME_W, SIZE)
         row_h = max(len(lines), len(name_lines)) * LINE_H + ROW_PAD
@@ -149,7 +156,7 @@ def draw_cover_pages(doc, teacher, results, month, warn) -> int:
             warn(f"{s.name!r}: long name wrapped onto {len(name_lines)} lines on the cover page")
         for i, ln in enumerate(name_lines):
             _text(t, COL_NAME, base + i * LINE_H, ln, name_size)
-        _right(t, COL_MONTH, base, f"{r.pages:,}")
+        _right(t, COL_MONTH, base, f"{r.pages:,}" if r.pages is not None else "—", color=mc.BLACK if r.pages is not None else GREY)
         _right(t, COL_TOTAL, base, f"{s.total:,}")
         for i, line in enumerate(lines):
             _text(t, COL_PRIZE, base + i * LINE_H, line, SIZE, color=mc.BLACK if items else GREY)
@@ -158,18 +165,23 @@ def draw_cover_pages(doc, teacher, results, month, warn) -> int:
     return pages_added
 
 
-def render_print_pdf(results, month, out_path, table=None) -> list[str]:
+def render_print_pdf(results, month, out_path, table=None, owed_rows=()) -> list[str]:
     """Write the classroom-grouped print PDF. Returns warnings (shrunk or wrapped text, etc.).
 
-    `results` come from checkpoint.apply_month. `month` is anything checkpoint.month_key accepts."""
+    `results` come from checkpoint.apply_month. `month` is anything checkpoint.month_key accepts. `owed_rows`:
+    [(student, levels)] still owed from earlier months; a class with only owed prizes gets a cover page alone."""
     table = table or mc.load_levels()
     label = ck.month_label(ck.month_key(month))
     warnings: list[str] = []
     doc = pymupdf.open()
     toc = []
-    for teacher, rs in ck.classrooms(results):
+    classes = dict(ck.classrooms(results))
+    for s, _ in owed_rows:
+        classes.setdefault(s.teacher, [])
+    for teacher in sorted(classes, key=str.lower):
+        rs = classes[teacher]
         start = doc.page_count + 1
-        draw_cover_pages(doc, teacher, rs, label, warnings.append)
+        draw_cover_pages(doc, teacher, rs, label, warnings.append, [o for o in owed_rows if o[0].teacher == teacher])
         for r in rs:
             row = {"name": r.student.name, "pages": str(r.pages), "total_pages": str(r.student.total),
                    "_default_month": label}

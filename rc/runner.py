@@ -118,7 +118,15 @@ class Month:
         rows = audit.sheet_rows(p, self.decisions(), results)
         checked = audit.checks(self.records(), p, before, cp_with_new, new_cp, results, self.table)
         spots = audit.spot_checks(rows, self.folder.month)
-        events = month_events(p, before, cp_with_new, results, self.folder.month, who) if events_mode else []
+        owed = {}                                   # prizes crossed earlier but never handed out: bag them now
+        if events_mode:
+            state = self.log.state()
+            owed = {sid: lv for sid, lv in state.owed(self.table).items() if state.students[sid].status == ck.ACTIVE}
+        owed_rows = [(new_cp.students[sid], lv) for sid, lv in owed.items()]
+        if owed:
+            notes = notes + [f"owed from earlier, bagged now: {new_cp.students[sid].name}: "
+                             + ", ".join(f"{p} ({t:,})" for t, _, p in lv) for sid, lv in owed.items()]
+        events = month_events(p, before, cp_with_new, results, self.folder.month, who, owed) if events_mode else []
         if events_mode:                       # the log, replayed, must say exactly what this month computed
             replayed = ev.replay(self.log.read() + events)
             bad = [r.student.name for r in results if replayed.students[r.student.id].total != r.student.total]
@@ -129,9 +137,10 @@ class Month:
 
         self.folder.create()
         warnings: list[str] = []
-        wsp.save_atomic(lambda tmp: warnings.extend(render.render_print_pdf(results, label, tmp, self.table)),
+        wsp.save_atomic(lambda tmp: warnings.extend(render.render_print_pdf(results, label, tmp, self.table, owed_rows)),
                         self.folder.certificates)
-        text = summary(label, why, before, new_cp, results, notes, warnings, self.table, audit.report(checked, spots))
+        text = summary(label, why, before, new_cp, results, notes, warnings, self.table, audit.report(checked, spots),
+                       owed_rows)
         wsp.write_atomic(self.folder.summary, text)
         if events_mode:
             if not all(ok for ok, _ in checked):
@@ -164,7 +173,7 @@ def reopen_month(m: "Month", who: str, reason: str = "") -> int:
 
 
 def month_events(p: rv.Plan, before: ck.Checkpoint, with_new: ck.Checkpoint, results, month: str,
-                 who: str) -> list[ev.Event]:
+                 who: str, owed: dict | None = None) -> list[ev.Event]:
     """What finishing a month adds to the log, each change pointing at the sheet(s) it came from. All share one
     batch id (the month_finished event's), so reopening the month cancels exactly these."""
     import datetime as dt
@@ -207,6 +216,9 @@ def month_events(p: rv.Plan, before: ck.Checkpoint, with_new: ck.Checkpoint, res
             if r.prizes:
                 mk("prizes_given", {"student": sid, "month": month, "levels": [t for t, _, _ in r.prizes]},
                    [src_of(x) for x in (item.sources or [item.record])])
+    for sid, levels in (owed or {}).items():
+        mk("prizes_given", {"student": sid, "month": month, "levels": [t for t, _, _ in levels]}, [],
+           f"owed from earlier; bagged with {ck.month_label(month)}")
     return out
 
 
@@ -227,11 +239,14 @@ def describe_issues(p: rv.Plan) -> list[str]:
     return lines
 
 
-def summary(label, source, before, after, results, notes, warnings, table, checks=()) -> str:
+def summary(label, source, before, after, results, notes, warnings, table, checks=(), owed_rows=()) -> str:
     new_ids = set(after.students) - set(before.students)
     prizes = Counter()
     for r in results:
         for p in r.prizes:
+            prizes[p[2]] += 1
+    for _, levels in owed_rows:
+        for p in levels:
             prizes[p[2]] += 1
     absent = ck.not_seen(after, results)
     out = [f"Reading Challenge - {label}", "=" * 40, "",
@@ -240,7 +255,9 @@ def summary(label, source, before, after, results, notes, warnings, table, check
            f"New students: {len(new_ids)}   Pages read: {sum(r.pages for r in results):,}", ""]
     if checks:
         out += list(checks) + [""]
-    out.append("Prizes to hand out" + ("" if prizes else ": none"))
+    n_owed = sum(len(lv) for _, lv in owed_rows)
+    out.append("Prizes to hand out" + ("" if prizes else ": none")
+               + (f" (including {n_owed} owed from earlier months)" if n_owed else ""))
     order = {}
     for threshold, _, prize in table:
         order.setdefault(prize, threshold)

@@ -292,6 +292,51 @@ def _source_text(e: Event) -> str:
     return ", ".join(parts) or e.kind
 
 
+def adjustment_events(state: State, who: str, reason: str, student: str = "", teacher=None, grade=None, name=None,
+                      month=None, pages=None, total=None, note=None, void=None) -> list[Event]:
+    """The events for a correction made by hand (command line or the app's Adjust form). Validated on append."""
+    manual = ({"manual": True},)
+    reason = (reason or "").strip()
+    if void:
+        hit = [e for e in state.events if e.id.startswith(void)]
+        if len(hit) != 1:
+            raise EventError(f"no single event starting with {void!r}")
+        if hit[0].kind == "event_voided":
+            raise EventError("a cancellation cannot itself be cancelled; record the change again instead")
+        return [Event("event_voided", {"event": hit[0].id}, who, reason, manual)]
+    if student not in state.students:
+        raise EventError(f"no student {student!r}")
+    out = []
+    for kind, fld, value in (("teacher_set", "teacher", teacher), ("grade_set", "grade", grade),
+                             ("name_set", "name", name)):
+        if value is not None and str(value).strip() and str(value).strip() != getattr(state.students[student], fld):
+            out.append(Event(kind, {"student": student, fld: " ".join(str(value).split())}, who, reason, manual))
+    if pages not in (None, "", 0):
+        if not month:
+            raise EventError("a page correction needs the month it belongs to")
+        out.append(Event("pages_adjusted", {"student": student, "month": ck.month_key(month), "delta": int(pages)},
+                         who, reason, manual))
+    if total not in (None, ""):
+        out.append(Event("total_set", {"student": student, "total": int(total)}, who, reason, manual))
+    if note and str(note).strip():
+        out.append(Event("note_added", {"student": student, "text": str(note).strip()}, who, reason, manual))
+    if not out:
+        raise EventError("nothing to change")
+    return out
+
+
+def describe_source(src: dict) -> str:
+    if "scan" in src:
+        return f"{src['scan']} p. {src.get('page', '?')}"
+    if "photo" in src:
+        return f"photo {src['photo']}"
+    if "form" in src:
+        return f"form {src['form']} row {src.get('row', '?')}" + (f" ({src['submitted']})" if src.get("submitted") else "")
+    if "workbook" in src:
+        return f"{src['workbook']}: {src.get('tab', '')}" + (f" row {src['row']}" if src.get("row") else "")
+    return "by hand" if src.get("manual") else json.dumps(src)
+
+
 # ---------------------------------------------------------------------------- the files
 def device_name() -> str:
     import socket

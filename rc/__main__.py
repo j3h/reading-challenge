@@ -208,32 +208,11 @@ def cmd_adjust(args):
     log = ev.EventLog(_data(args).root)
     state = log.state()
     who, why = _who(args), (args.reason or "").strip()
-    manual = ({"manual": True},)
-    new = []
-    if args.void:
-        hit = [e for e in state.events if e.id.startswith(args.void)]
-        if len(hit) != 1:
-            sys.exit(f"no single event starting with {args.void!r}")
-        new.append(ev.Event("event_voided", {"event": hit[0].id}, who, why, manual))
-    else:
-        s = _find_student(state, args.student) if args.student else None
-        if s is None:
-            sys.exit("say which student: --student NAME or ID")
-        for kind, field, value in (("teacher_set", "teacher", args.teacher), ("grade_set", "grade", args.grade),
-                                   ("name_set", "name", args.name)):
-            if value is not None:
-                new.append(ev.Event(kind, {"student": s.id, field: value.strip()}, who, why, manual))
-        if args.pages is not None:
-            if not args.month:
-                sys.exit("--pages needs --month (which month the correction belongs to)")
-            new.append(ev.Event("pages_adjusted", {"student": s.id, "month": ck.month_key(args.month), "delta": args.pages},
-                                who, why, manual))
-        if args.total is not None:
-            new.append(ev.Event("total_set", {"student": s.id, "total": args.total}, who, why, manual))
-        if args.note:
-            new.append(ev.Event("note_added", {"student": s.id, "text": args.note}, who, why, manual))
-    if not new:
-        sys.exit("nothing to change: give --teacher, --grade, --name, --pages/--month, --total, --note or --void")
+    s = _find_student(state, args.student) if args.student and not args.void else None
+    if not args.void and s is None:
+        sys.exit("say which student: --student NAME or ID")
+    new = ev.adjustment_events(state, who, why, s.id if s else "", args.teacher, args.grade, args.name, args.month,
+                               args.pages, args.total, args.note, args.void)
     state = log.append(new)
     for e in new:
         print("Recorded:", e.describe())

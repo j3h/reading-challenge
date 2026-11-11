@@ -52,6 +52,20 @@
   .bar { height: 10px; border-radius: 99px; background: var(--info-bg); overflow: hidden; }
   .bar > div { height: 100%; background: var(--teal); transition: width .4s; }
   details summary { cursor: pointer; color: var(--muted); }
+  table.list { width: 100%; border-collapse: collapse; }
+  table.list th { text-align: left; font: 600 12px Montserrat, sans-serif; color: var(--accent); text-transform: uppercase;
+                  letter-spacing: .04em; padding: 6px 8px; border-bottom: 2px solid var(--line); }
+  table.list td { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  table.list tr.pick { cursor: pointer; } table.list tr.pick:hover td { background: var(--info-bg); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .owed { color: var(--open); font-weight: 600; font-size: 13px; }
+  .form-grid { display: grid; grid-template-columns: 150px 1fr; gap: 8px 12px; align-items: center; max-width: 640px; }
+  .form-grid label { color: var(--muted); font-size: 13px; }
+  .tl { display: flex; flex-direction: column; gap: 0; }
+  .tl .ev { display: grid; grid-template-columns: 96px 1fr auto; gap: 4px 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .tl .ev.cancelled .what { text-decoration: line-through; color: var(--muted); }
+  .tl .when { color: var(--muted); font-size: 13px; }
+  .tl .meta { grid-column: 2 / 4; color: var(--muted); font-size: 12px; }
   #error { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #b3261e; color: #fff;
            padding: 10px 16px; border-radius: 10px; display: none; max-width: 80vw; z-index: 10; }
 </style>
@@ -60,6 +74,8 @@
 <header>
   <span class="badge">BCS PTA</span>
   <h1>Reading Challenge</h1>
+  <button id="monthsBtn" hidden>Months</button>
+  <button id="studentsBtn">Students</button>
   <button id="settingsBtn">Settings</button>
   <button id="quitBtn" title="Stop the app (nothing is lost)">Quit</button>
 </header>
@@ -68,7 +84,7 @@
 <script>
 "use strict";
 const TOKEN = "__TOKEN__";
-let state = null, showSettings = false, uploading = "", polling = null;
+let state = null, showSettings = false, uploading = "", polling = null, people = null, person = null, filter = "";
 const $ = (id) => document.getElementById(id);
 function el(tag, attrs, ...kids) {              // text only: nothing is ever parsed as HTML
   const e = document.createElement(tag);
@@ -187,9 +203,92 @@ async function upload(month, files) {
   uploading = ""; render();
 }
 
+// ---------------------------------------------------------------- students: history and corrections
+const route = () => location.hash.startsWith("#student=") ? ["student", decodeURIComponent(location.hash.slice(9))]
+                  : location.hash === "#students" ? ["students"] : ["months"];
+
+async function loadPeople() {
+  try { people = await api("/api/home/students"); } catch (e) { people = { students: [], problems: [e.message] }; }
+  render();
+}
+async function loadPerson(id) {
+  try { person = await api("/api/home/student?id=" + encodeURIComponent(id)); } catch (e) { person = null; fail(e.message); }
+  render();
+}
+
+function studentsView() {
+  if (!people) { loadPeople(); return [el("div", { class: "card" }, "Loading…")]; }
+  const search = el("input", { type: "search", placeholder: "Find a student or teacher…", value: filter, size: 34,
+    oninput: (e) => { filter = e.target.value; const pos = e.target.selectionStart; render(); const s = $("search"); s.focus(); s.setSelectionRange(pos, pos); } });
+  search.id = "search";
+  const q = filter.trim().toLowerCase();
+  const rows = people.students.filter((p) => !q || (p.name + " " + p.teacher + " " + p.also).toLowerCase().includes(q));
+  const owedCount = people.students.filter((p) => p.owed.length).length;
+  return [el("div", { class: "card" }, el("h2", {}, "Students"),
+    el("div", { class: "row" }, search, el("span", { class: "muted" }, `${rows.length} of ${people.students.length}`),
+      owedCount ? el("button", { onclick: () => { filter = ""; people.students.sort((a, b) => b.owed.length - a.owed.length); render(); } }, `${owedCount} owed a prize`) : null),
+    ...people.problems.map((p) => el("p", { class: "bad" }, p)),
+    el("table", { class: "list" }, el("thead", {}, el("tr", {}, ["Name", "Teacher", "Grade", "Total", ""].map((h) => el("th", {}, h)))),
+      el("tbody", {}, rows.slice(0, 300).map((p) => el("tr", { class: "pick", onclick: () => location.hash = "#student=" + encodeURIComponent(p.id) },
+        el("td", {}, p.name, p.left ? el("span", { class: "muted" }, " (left)") : null),
+        el("td", {}, p.teacher || el("span", { class: "muted" }, "none")), el("td", {}, p.grade),
+        el("td", { class: "num" }, fmt(p.total)),
+        el("td", {}, p.owed.length ? el("span", { class: "owed" }, "owed: " + p.owed.join(", ")) : null))))))];
+}
+
+function studentView(id) {
+  if (!person || person.student.id !== id) { loadPerson(id); return [el("div", { class: "card" }, "Loading…")]; }
+  const s = person.student;
+  const f = { teacher: el("input", { value: s.teacher, list: "teacherlist" }), grade: el("input", { value: s.grade, size: 4 }),
+              name: el("input", { value: s.name, size: 30 }), pages: el("input", { type: "number", placeholder: "e.g. 20 or -20", size: 10 }),
+              month: el("input", { type: "month" }), total: el("input", { type: "number", placeholder: "rarely needed", size: 10 }),
+              note: el("input", { size: 40 }), reason: el("input", { size: 50, placeholder: "required: kept with the change" }) };
+  const save = async () => {
+    const change = { reason: f.reason.value, teacher: f.teacher.value, grade: f.grade.value, name: f.name.value,
+                     pages: f.pages.value ? Number(f.pages.value) : null, month: f.month.value || null,
+                     total: f.total.value === "" ? null : Number(f.total.value), note: f.note.value };
+    try { person = await api("/api/home/adjust", { student: s.id, change }); people = null; render(); } catch (e) { fail(e.message); }
+  };
+  const cancel = async (e) => {
+    const reason = prompt(`Cancel "${e.text}"? It stays in the history, crossed out.\n\nWhy?`);
+    if (!reason) return;
+    try { person = await api("/api/home/adjust", { student: s.id, change: { void: e.id, reason } }); people = null; render(); } catch (err) { fail(err.message); }
+  };
+  return [
+    el("div", { class: "card" },
+      el("div", { class: "row" }, el("a", { href: "#students" }, "← Students")),
+      el("h2", { style: "margin-top:8px" }, s.name),
+      el("p", {}, `${s.teacher || "No teacher"} · grade ${s.grade || "?"} · `, el("b", {}, `${fmt(s.total)} pages`),
+        s.also ? el("span", { class: "muted" }, ` · also called ${s.also}`) : null),
+      s.owed.length ? el("p", { class: "owed" }, "Owed (crossed but never handed out): " + s.owed.join(", ")) : null,
+      s.notes ? el("p", { class: "muted" }, s.notes) : null),
+    el("div", { class: "card" }, el("h2", {}, "Make a correction"),
+      el("p", { class: "muted" }, "Change only what is wrong. Every change is recorded with your name and the reason; nothing is overwritten."),
+      el("datalist", { id: "teacherlist" }, person.teachers.map((t) => el("option", { value: t }))),
+      el("div", { class: "form-grid" },
+        el("label", {}, "Teacher"), f.teacher, el("label", {}, "Grade"), f.grade, el("label", {}, "Name"), f.name,
+        el("label", {}, "Add or remove pages"), el("div", { class: "row" }, f.pages, el("span", { class: "muted" }, "for"), f.month),
+        el("label", {}, "Set total to"), f.total, el("label", {}, "Note"), f.note,
+        el("label", {}, "Why"), f.reason, el("span"), el("div", {}, el("button", { class: "primary", onclick: save }, "Record correction")))),
+    el("div", { class: "card" }, el("h2", {}, "History"), el("p", { class: "muted" }, "Newest first. Every number comes from one of these."),
+      el("div", { class: "tl" }, person.timeline.map((e) => el("div", { class: "ev" + (e.cancelled ? " cancelled" : "") },
+        el("div", { class: "when" }, e.time.slice(0, 10)),
+        el("div", { class: "what" }, e.text),
+        e.cancelled || e.kind === "event_voided" || e.kind === "student_added" ? el("span") : el("button", { onclick: () => cancel(e), title: "Cancel this change (it stays visible, crossed out)" }, "Cancel"),
+        el("div", { class: "meta" }, [`by ${e.who}`, e.sources.map((x) => x === "by hand" ? "entered by hand" : "from " + x).join(", "),
+          e.cancelled ? `cancelled by ${e.cancelled_by}: ${e.cancel_reason}` : ""].filter(Boolean).join(" · ")))))),
+  ];
+}
+
 // ---------------------------------------------------------------- page
 function render() {
   const app = $("app");
+  const [view, arg] = route();
+  $("monthsBtn").hidden = view === "months"; $("studentsBtn").hidden = view !== "months";
+  if (view !== "months" && state.folder_ok) {
+    app.replaceChildren(...(view === "students" ? studentsView() : studentView(arg)));
+    return;
+  }
   if (!state.folder_ok || !state.api_key || !state.who) {
     app.replaceChildren(el("div", { class: "card" }, el("h2", {}, "Welcome"),
       el("p", {}, "Three things to set up once: where the data folder is, your name, and the key for reading the scans.")), settingsCard(true),
@@ -218,7 +317,10 @@ function months() {
   return out;
 }
 
-$("settingsBtn").addEventListener("click", () => { showSettings = !showSettings; render(); });
+$("settingsBtn").addEventListener("click", () => { showSettings = !showSettings; location.hash = ""; render(); });
+$("studentsBtn").addEventListener("click", () => { location.hash = "#students"; });
+$("monthsBtn").addEventListener("click", () => { location.hash = ""; });
+window.addEventListener("hashchange", () => { if (route()[0] === "students") people = null; render(); });
 $("quitBtn").addEventListener("click", async () => {
   if (!confirm("Quit Reading Challenge? Everything is saved; double-click the app to start it again.")) return;
   try { await api("/api/home/quit", {}); } catch (e) { /* stopping */ }

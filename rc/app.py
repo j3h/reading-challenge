@@ -291,6 +291,64 @@ class Home:
         self._reviews.pop(f.month, None)
         return self.state()
 
+    # ------------------------------------------------------------------ students: history and corrections
+    def _log(self):
+        from rc import events as ev
+        log = ev.EventLog(self.ws.root)
+        if not log.has_students():
+            raise ck.CheckpointError("this data folder has no event log yet (import the master workbook first)")
+        return log
+
+    def students(self) -> dict:
+        import make_certificates as mc
+        log = self._log()
+        st = log.state()
+        owed = st.owed(mc.load_levels())
+        return {"students": [{"id": s.id, "name": s.name, "teacher": s.teacher, "grade": s.grade, "total": s.total,
+                              "left": s.status != ck.ACTIVE, "also": s.nicknames,
+                              "owed": [p for _, _, p in owed.get(s.id, [])]}
+                             for s in sorted(st.students.values(), key=lambda s: s.name.lower())],
+                "problems": log.problems() + st.warnings}
+
+    def student(self, sid: str) -> dict:
+        import make_certificates as mc
+        from rc import events as ev
+        log = self._log()
+        st = log.state()
+        if sid not in st.students:
+            raise KeyError(sid)
+        s = st.students[sid]
+        by_id = {e.id: e for e in st.events}
+        voided_by = {e.data["event"]: e for e in st.events if e.kind == "event_voided"}
+        timeline = []
+        for e in st.by_student.get(sid, []):
+            v = voided_by.get(e.id) if e.id in st.voided else None
+            timeline.append({"id": e.id, "time": e.time, "who": e.who, "device": e.device, "kind": e.kind,
+                             "text": e.describe(), "reason": e.reason,
+                             "sources": [ev.describe_source(x) for x in e.sources],
+                             "cancelled": bool(v), "cancelled_by": v.who if v else "",
+                             "cancel_reason": v.reason if v else ""})
+        return {"student": {"id": s.id, "name": s.name, "teacher": s.teacher, "grade": s.grade, "total": s.total,
+                            "notes": s.notes, "also": s.nicknames,
+                            "owed": [f"{p} ({t:,})" for t, _, p in st.owed(mc.load_levels()).get(sid, [])]},
+                "timeline": timeline[::-1], "teachers": sorted({x.teacher for x in st.students.values() if x.teacher})}
+
+    def adjust(self, sid: str, change: dict) -> dict:
+        from rc import events as ev
+        log = self._log()
+        who = settings.who()
+        if not who:
+            raise ck.CheckpointError("add your name in Settings first: it is recorded on every change")
+        if not str(change.get("reason", "")).strip():
+            raise ck.CheckpointError("say why: the reason is kept with the change")
+        events = ev.adjustment_events(log.state(), who, change.get("reason", ""), sid,
+                                      change.get("teacher"), change.get("grade"), change.get("name"),
+                                      change.get("month"), change.get("pages"), change.get("total"),
+                                      change.get("note"), change.get("void"))
+        log.append(events)
+        self._reviews = {}                          # review screens recompute from the new state
+        return self.student(sid)
+
     def show_in_finder(self, month: str | None = None, what: str = "folder") -> None:
         if sys.platform != "darwin":
             raise ck.CheckpointError("only on a Mac")
