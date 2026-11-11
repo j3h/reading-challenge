@@ -48,6 +48,16 @@ def who(override: str = "") -> str:
     return (override or os.environ.get("READING_CHALLENGE_WHO") or load().get("who") or "").strip()
 
 
+KEEP_RAW_MONTHS = 6       # finished months older than this may have their scans and photos let go
+
+
+def keep_raw_months() -> int:
+    try:
+        return max(1, int(load().get("keep_raw_months", KEEP_RAW_MONTHS)))
+    except (TypeError, ValueError):
+        return KEEP_RAW_MONTHS
+
+
 # ---------------------------------------------------------------------------- API key
 def _keyring():
     import keyring

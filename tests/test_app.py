@@ -262,3 +262,30 @@ def test_students_page_lists_shows_history_and_records_corrections(tmp_path, mon
     assert crossed["cancelled"] and crossed["cancelled_by"] == "Jamie" and "after all" in crossed["cancel_reason"]
     with pytest.raises(ck.CheckpointError, match="nothing to change"):
         home.adjust("S0001", {"teacher": "Park", "reason": "same as before"})
+
+
+def test_old_months_scans_can_be_let_go_and_nothing_else(data, monkeypatch):
+    home = app_mod.Home(data)
+    trashed = []
+    monkeypatch.setattr(home, "_trash", lambda files: [trashed.append(p) or p.unlink() for p in files])
+    settings.save({"who": "Jamie", "keep_raw_months": 2})
+    for month in ("2026-10", "2026-11", "2026-12", "2027-01"):
+        home.create_month(month)
+        body = pdf_bytes(1)
+        home.add_scan(month, "s.pdf", io.BytesIO(body), len(body))
+        home.start_reading(month, client=FakeClient([answer("Ada Example", "Lopez", total=10)]))
+        wait_for(home)
+        home.review(month).finish()
+    st = home.state()
+    assert [p["key"] for p in st["prunable"]] == ["2026-10"]          # more than 2 months before January
+    with pytest.raises(ck.CheckpointError, match="not finished long enough ago"):
+        home.let_go(["2026-11"])
+    st = home.let_go(["2026-10"])
+    oct_ = data / "2026-27" / "2026-10"
+    assert {p.name for p in trashed} == {"s.pdf", "s.p0001.json"} and st["prunable"] == []
+    assert (oct_ / "checkpoint.xlsx").exists() and (oct_ / "certificates.pdf").exists() and (oct_ / "work" / "records.json").exists()
+    note = (oct_ / "work" / "removed.txt").read_text()
+    assert "Jamie moved 2 raw file(s) to the Trash" in note and "scans/s.pdf" in note
+    assert home.month_status("2026-10")["finished"]                    # still a finished month
+    with pytest.raises(ck.CheckpointError, match="at least 1"):
+        home.set_keep_raw(0)

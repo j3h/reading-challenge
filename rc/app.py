@@ -171,7 +171,9 @@ class Home:
                "who": settings.who(),
                "api_key": settings.api_key_source(), "months": [], "suggested": "", "job": self.job.as_dict()
                if self.job else None, "mac": sys.platform == "darwin"}
+        out["keep_raw_months"] = settings.keep_raw_months()
         if out["folder_ok"]:
+            out["prunable"] = self.prunable()
             out["months"] = [self.month_status(k) for k in self.months()]
             out["unfinished"] = [m["label"] for m in out["months"] if not m["finished"]]
             out["suggested"] = "" if out["unfinished"] else self.suggested_month()
@@ -348,6 +350,72 @@ class Home:
         log.append(events)
         self._reviews = {}                          # review screens recompute from the new state
         return self.student(sid)
+
+    # ------------------------------------------------------------------ letting raw data go
+    def raw_files(self, key: str) -> list[Path]:
+        """A month's raw material: scans, photos (and their originals), form CSVs, cached readings."""
+        f = self.month(key).folder
+        out = []
+        for d in (f.scans, f.work / "raw"):
+            if d.is_dir():
+                out += sorted(p for p in d.rglob("*") if p.is_file() and not p.name.startswith("."))
+        return out
+
+    def prunable(self) -> list[dict]:
+        """Finished months more than `keep_raw_months` before the latest finished month that still have raw files.
+        Their totals, history (event log), certificates, summary, readings (records.json) and review decisions stay."""
+        finished = [k for k in self.months() if self.month(k).folder.is_finished()]
+        if not finished:
+            return []
+        y, m = (int(x) for x in max(finished).split("-"))
+        back = y * 12 + (m - 1) - settings.keep_raw_months()
+        cutoff = f"{back // 12}-{back % 12 + 1:02d}"
+        out = []
+        for k in sorted(finished):
+            if k < cutoff:
+                files = self.raw_files(k)
+                if files:
+                    out.append({"key": k, "label": ck.month_label(k), "files": len(files),
+                                "mb": round(sum(p.stat().st_size for p in files) / 1e6, 1)})
+        return out
+
+    def let_go(self, months: list[str]) -> dict:
+        """Move the raw files of these (prunable) months to the Trash, and note it in each month's folder."""
+        allowed = {x["key"] for x in self.prunable()}
+        months = [ck.month_key(k) for k in months]
+        bad = [k for k in months if k not in allowed]
+        if bad:
+            raise ck.CheckpointError(f"{ck.month_label(bad[0])} is not finished long enough ago to let its scans go")
+        who = settings.who() or "(no name set)"
+        for k in months:
+            files = self.raw_files(k)
+            self._trash(files)
+            f = self.month(k).folder
+            stamp = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+            lines = [f"{stamp}  {who} moved {len(files)} raw file(s) to the Trash (kept {settings.keep_raw_months()} "
+                     f"months; totals, history and certificates are kept):"] + [f"    {p.relative_to(f.path)}" for p in files]
+            with open(f.work / "removed.txt", "a", encoding="utf-8") as fh:
+                fh.write("\n".join(lines) + "\n")
+        return self.state()
+
+    def _trash(self, files: list[Path]) -> None:
+        """Move to the Trash (recoverable), never delete outright."""
+        if not files:
+            return
+        if sys.platform != "darwin":
+            raise ck.CheckpointError("moving files to the Trash is only automatic on a Mac; remove them by hand")
+        script = ('on run argv\n tell application "Finder"\n repeat with p in argv\n delete (POSIX file (p as text))\n'
+                  ' end repeat\n end tell\nend run')
+        done = subprocess.run(["osascript", "-e", script, *[str(p) for p in files]], capture_output=True, text=True)
+        if done.returncode != 0:
+            raise ck.CheckpointError(f"could not move the files to the Trash: {done.stderr.strip()}")
+
+    def set_keep_raw(self, months: int) -> dict:
+        months = int(months)
+        if months < 1:
+            raise ck.CheckpointError("keep at least 1 month")
+        settings.save({"keep_raw_months": months})
+        return self.state()
 
     def show_in_finder(self, month: str | None = None, what: str = "folder") -> None:
         if sys.platform != "darwin":

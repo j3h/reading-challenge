@@ -99,7 +99,7 @@ except extraction (OCR), the review UI and the one-command runner.
 - Tests use made-up children only. Run with `.venv/bin/python -m pytest -q` (Python via `uv`, see below).
 - Python: the system `python3` shim is broken on this Mac; use `uv venv .venv && uv pip install -r requirements.txt`.
 
-## Event log (`rc/events.py`, in progress: steps 1-4 of 5 done)
+## Event log (`rc/events.py`)
 Every change is an append-only event with who/when/which Mac, a reason, and `sources` pointing at the evidence
 (scan page, photo, form row, workbook tab+row, or manual). State = replay in time order; checkpoint.xlsx is a
 snapshot (`python -m rc snapshot OUT`). One file per Mac in `<data>/events/<device>.jsonl` (temp file + rename),
@@ -116,7 +116,9 @@ turns that month's rows (by the "Month" answer) into SheetRecords (file#row, gra
 any sheet (`Month.records`), with source {"form", "row", "submitted"}. The app's Students page (`Home.students/student/
 adjust`) lists children, shows each one's timeline with sources and cancellations, and records corrections (reason
 required) via `events.adjustment_events`. Prizes owed (crossed, never given) are bagged at the next finish: on the
-cover pages marked "(owed)", in the summary, and recorded as `prizes_given`. Still to do: raw-data retention.
+cover pages marked "(owed)", in the summary, and recorded as `prizes_given`. Raw data: `Home.prunable/let_go` offer (never automatic) to move scans, photos, form CSVs
+and cached readings of finished months older than `keep_raw_months` (Settings, default 6) to the Trash; the month
+keeps its outputs, records.json and decisions, and notes the removal in `work/removed.txt`.
 
 ## The app (`python -m rc app`, double-click "Reading Challenge" on a set-up Mac)
 For a non-programmer (Jamie): the whole month in the browser, no CLI. See `docs/mac-setup.md` (install) and

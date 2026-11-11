@@ -358,6 +358,10 @@ def make_server(app: ReviewApp | None = None, port: int = 0, home=None) -> tuple
                 return home.reopen(month, str(body.get("reason", "")))
             if action == "who":
                 return home.set_who(str(body.get("name", "")))
+            if action == "let_go":
+                return home.let_go([str(x) for x in body.get("months", [])])
+            if action == "keep_raw":
+                return home.set_keep_raw(int(body.get("months", 0)))
             if action == "adjust":
                 return home.adjust(str(body.get("student", "")), dict(body.get("change") or {}))
             if action == "finder":

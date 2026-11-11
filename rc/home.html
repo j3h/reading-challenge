@@ -120,6 +120,7 @@ function settingsCard(force) {
   const key = el("input", { type: "password", placeholder: "sk-ant-…", autocomplete: "off", size: 36 });
   const path = el("input", { value: state.data_folder, placeholder: "/Users/…/Reading Challenge", size: 50 });
   const whoInput = el("input", { value: state.who || "", placeholder: "e.g. Jamie", size: 24 });
+  const keepInput = el("input", { type: "number", min: 1, value: state.keep_raw_months, size: 4 });
   const keyText = { environment: "Using the key from the command line (1Password).", keychain: "Saved in this Mac's Keychain.", "": "Not set yet." }[state.api_key];
   return el("div", { class: "card" + (force ? " warn" : "") }, el("h2", {}, "Settings"),
     el("h3", {}, "Data folder"),
@@ -132,6 +133,10 @@ function settingsCard(force) {
     el("p", { class: "muted" }, "Recorded on every change you make (finishing a month, corrections), so anyone can see later who did what."),
     el("div", { class: "row" }, whoInput,
       el("button", { class: state.who ? "" : "primary", onclick: () => act("/api/home/who", { name: whoInput.value }) }, state.who ? "Change" : "Save name")),
+    el("h3", {}, "Keeping scans"),
+    el("p", { class: "muted" }, "Scans, photos and form downloads are kept while a month might still need fixing. After this many months the home screen offers to move them to the Trash (totals, history and certificates always stay)."),
+    el("div", { class: "row" }, keepInput, el("span", {}, "months"),
+      el("button", { onclick: () => act("/api/home/keep_raw", { months: Number(keepInput.value) }) }, "Save")),
     el("h3", {}, "Claude API key"),
     el("p", { class: "muted" }, "Used to read the scanned sheets (about 3½ cents a page). It is kept in the Mac's Keychain, not in a file."),
     el("p", {}, keyText),
@@ -309,6 +314,14 @@ function months() {
     out.push(el("div", { class: "card" }, el("h2", {}, "Start a month"),
       el("div", { class: "row" }, pick, el("button", { class: "primary", onclick: () => act("/api/home/month", { month: pick.value }) }, "Start")),
       el("p", { class: "muted" }, "Starts from: " + (state.suggested_starts_from || "nothing yet"))));
+  }
+  if ((state.prunable || []).length) {
+    const list = state.prunable.map((p) => `${p.label} (${p.files} files, ${p.mb} MB)`).join(", ");
+    out.push(el("div", { class: "card" }, el("h2", {}, "Old scans you can let go"),
+      el("p", {}, `These months were finished more than ${state.keep_raw_months} months before the latest one: ${list}.`),
+      el("p", { class: "muted" }, "Their totals, history, certificates and review notes stay. The scans, photos and form downloads go to the Trash (you can still get them back from there for a while), and each month notes what was removed."),
+      el("button", { onclick: () => confirm(`Move the scans of ${state.prunable.length} month(s) to the Trash?`) &&
+        act("/api/home/let_go", { months: state.prunable.map((p) => p.key) }) }, "Move them to the Trash")));
   }
   const [latest, ...older] = state.months;
   if (latest) out.push(monthCard(latest, true));
