@@ -287,7 +287,7 @@ class Home:
             runner.reopen_month(m, settings.who(), reason)
         aside = f.path / ("reopened " + dt.datetime.now().strftime("%Y-%m-%d %H.%M.%S"))
         aside.mkdir()
-        for p in (f.checkpoint, f.certificates, f.summary):      # checkpoint first: the month is open again
+        for p in (f.checkpoint, f.certificates, f.class_lists, f.summary):   # checkpoint first: open again
             if p.exists():
                 shutil.move(str(p), aside / p.name)
         self._reviews.pop(f.month, None)

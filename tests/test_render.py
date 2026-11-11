@@ -109,3 +109,13 @@ def test_all_pages_are_landscape_letter(tmp_path):
     out = tmp_path / "print.pdf"
     render.render_print_pdf(results, "October 2026", out)
     assert {(round(p.rect.width), round(p.rect.height)) for p in pymupdf.open(out)} == {(792, 612)}
+
+
+def test_cut_and_stack_puts_each_class_in_order_after_one_cut():
+    from rc import render as rd
+    for n in range(1, 30):
+        sheets = rd.cut_and_stack(n)
+        top_pile = [top for top, _ in sheets]
+        bottom_pile = [b for _, b in sheets if b is not None]
+        assert top_pile + bottom_pile == list(range(n))           # bottom pile placed under the top pile
+        assert len(sheets) == (n + 1) // 2

@@ -27,8 +27,13 @@ this Mac: nothing goes on the internet except the scanned pages, which are sent 
      offer them by name.
    - **W** shows the whole scanned sheet.
 6. **Finish month** (top right). You get:
-   - **certificates.pdf**: print this. Each class starts with a cover page listing its children and prizes,
-     for bagging.
+   - **class-lists.pdf**: print this first. Every class on one sheet: what to bag for each child, the whole
+     school's prize count at the top (for pulling prizes from stock), and anything **owed** from earlier.
+   - **certificates.pdf**: two certificates per letter sheet, each class on its own sheets. Print at **100% /
+     actual size** (not "2 pages per sheet"). For each class: cut the stack once across the middle (the little
+     marks at the edges show where), put the bottom pile under the top pile, and it's in the same order as the
+     class list. The small grey label in the margin ("Barry · 3 of 6") puts a dropped pile back together; it
+     comes off when you trim the edges.
    - **summary.txt**: the prize totals, and at the top **Checks: all passed**. If it says **FAILED**, don't
      print it yet: ask for help.
    - **checkpoint.xlsx**: everyone's totals. Next month starts from it. The **Sheets** tab has a row for every

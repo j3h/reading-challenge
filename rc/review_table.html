@@ -356,7 +356,9 @@ function renderFinished() {
   $("finish").style.display = $("acceptAll").style.display = "none";
   document.querySelector(".bar").style.display = "none";
   const open = (file) => api("/api/open", { file }).catch((e) => fail(e.message));
-  const what = { certificates: "Print file, by classroom", checkpoint: "Students and totals (next month starts here)",
+  const what = { certificates: "Certificates, 2 per letter sheet: cut each class's stack once, put the bottom pile under the top",
+                 class_lists: "Class lists for bagging, all classes together",
+                 checkpoint: "Students and totals (next month starts here)",
                  summary: "What changed this month" };
   const rows = Object.entries(state.files).map(([k, path]) => {
     const name = path.split("/").pop();

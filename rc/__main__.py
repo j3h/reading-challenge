@@ -231,6 +231,14 @@ def cmd_reopen(args):
           f"a 'reopened ...' folder")
 
 
+def cmd_reprint(args):
+    m = _month(args)
+    warnings = runner.reprint(m)
+    print(f"Rewrote {m.folder.certificates}\n        {m.folder.class_lists}")
+    for w in warnings:
+        print("  -", w)
+
+
 def cmd_snapshot(args):
     from rc import events as ev
     state = ev.EventLog(_data(args).root).state()
@@ -245,7 +253,8 @@ def main(argv=None):
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data", help="data folder (outside git; e.g. in iCloud Drive)")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name, fn in (("start", cmd_start), ("check", cmd_check), ("finish", cmd_finish), ("reopen", cmd_reopen)):
+    for name, fn in (("start", cmd_start), ("check", cmd_check), ("finish", cmd_finish), ("reopen", cmd_reopen),
+                     ("reprint", cmd_reprint)):
         p = sub.add_parser(name)
         p.add_argument("--month", required=True, help='e.g. "October 2026"')
         if name in ("finish", "reopen"):

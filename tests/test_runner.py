@@ -65,9 +65,16 @@ def test_a_clean_month_finishes_and_writes_everything(data, capsys):
     assert {s.name: s.total for s in new.students.values()} == {
         "Ada Example": 104, "Sam Sample": 5, "Io Li": 2550, "Absent Al": 10}
 
-    texts = [p.get_text().replace("\xa0", " ") for p in pymupdf.open(mf.certificates)]
-    assert texts[0].startswith("Lopez") and texts[2].startswith("Park")      # cover pages
-    assert len(texts) == 2 + 3                                              # covers + certificates
+    certs = pymupdf.open(mf.certificates)
+    texts = [p.get_text().replace("\xa0", " ") for p in certs]
+    # 2 per letter sheet, each class on its own sheets: Lopez (1 child) then Park (2 children) = 2 sheets
+    assert len(texts) == 2 and certs[0].rect.width == 612 and certs[0].rect.height == 792
+    assert "Ada Example" in texts[0] and "Lopez  ·  1 of 1" in texts[0]
+    assert "Io Li" in texts[1] and "Sam Sample" in texts[1] and "Park  ·  2 of 2" in texts[1]
+    lists = pymupdf.open(mf.class_lists)
+    assert lists.page_count == 1
+    lt = lists[0].get_text().replace("\xa0", " ")
+    assert "Prizes to pull from stock" in lt and lt.index("Lopez") < lt.index("Park") and "Io Li" in lt
 
     summary = mf.summary.read_text()
     assert "Certificates: 3" in summary and "Absent Al (Lopez)" in summary

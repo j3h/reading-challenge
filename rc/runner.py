@@ -137,8 +137,11 @@ class Month:
 
         self.folder.create()
         warnings: list[str] = []
-        wsp.save_atomic(lambda tmp: warnings.extend(render.render_print_pdf(results, label, tmp, self.table, owed_rows)),
+        # certificates two to a letter sheet (cut and stack, by class); the class lists for bagging separately
+        wsp.save_atomic(lambda tmp: warnings.extend(render.render_certificates_2up(results, label, tmp, self.table)),
                         self.folder.certificates)
+        wsp.save_atomic(lambda tmp: warnings.extend(render.render_class_lists(results, label, tmp, owed_rows)),
+                        self.folder.class_lists)
         text = summary(label, why, before, new_cp, results, notes, warnings, self.table, audit.report(checked, spots),
                        owed_rows)
         wsp.write_atomic(self.folder.summary, text)
@@ -150,6 +153,41 @@ class Month:
                                             sheets=(audit.SHEET_COLS, [r.cells() for r in rows])),
                         self.folder.checkpoint)
         return text
+
+
+def reprint(m: "Month") -> list[str]:
+    """Redraw a finished month's certificates and class lists from the event log (no events change): for a new
+    layout, or a lost file. Pages, totals and prizes are exactly what the month's finish recorded."""
+    state = m.log.state()
+    month = m.folder.month
+    fin = state.finished.get(month)
+    if fin is None:
+        raise ck.CheckpointError(f"{ck.month_label(month)} is not finished in the event log")
+    batch = [e for e in state.events if e.batch == fin.batch and e.id not in state.voided]
+    pages = {e.student: e.data["pages"] for e in batch if e.kind == "pages_recorded"}
+    given = {}
+    owed_levels = {}
+    for e in batch:
+        if e.kind == "prizes_given":
+            target = owed_levels if "owed from earlier" in e.reason else given
+            target.setdefault(e.student, []).extend(e.data["levels"])
+    after = {}
+    for h in state.history:                      # each child's total right after this month's pages
+        if h.month == month and h.student_id in pages:
+            after[h.student_id] = h.total_after
+    level = {t: lv for lv in m.table for t in [lv[0]]}
+    results = []
+    for sid, n in pages.items():
+        s = ck.replace(state.students[sid], total=after.get(sid, state.students[sid].total))
+        results.append(ck.Result(s, n, s.total - n, tuple(level[t] for t in sorted(given.get(sid, [])) if t in level)))
+    owed_rows = [(state.students[sid], [level[t] for t in sorted(lv) if t in level]) for sid, lv in owed_levels.items()]
+    label = ck.month_label(month)
+    warnings: list[str] = []
+    wsp.save_atomic(lambda tmp: warnings.extend(render.render_certificates_2up(results, label, tmp, m.table)),
+                    m.folder.certificates)
+    wsp.save_atomic(lambda tmp: warnings.extend(render.render_class_lists(results, label, tmp, owed_rows)),
+                    m.folder.class_lists)
+    return warnings
 
 
 def reopen_month(m: "Month", who: str, reason: str = "") -> int:

@@ -34,6 +34,7 @@ from rc import checkpoint as ck
 SEASON_START_MONTH = 7   # July: a school-year folder runs July..June
 CHECKPOINT = "checkpoint.xlsx"
 CERTIFICATES = "certificates.pdf"
+CLASS_LISTS = "class-lists.pdf"
 SUMMARY = "summary.txt"
 SCAN_EXTS = {".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 PHOTO_EXTS = {".webp", ".heic", ".heif"}        # emailed or phone photos: converted to JPEG on the way in
@@ -72,6 +73,10 @@ class MonthFolder:
     @property
     def certificates(self) -> Path:
         return self.path / CERTIFICATES
+
+    @property
+    def class_lists(self) -> Path:
+        return self.path / CLASS_LISTS
 
     @property
     def summary(self) -> Path:

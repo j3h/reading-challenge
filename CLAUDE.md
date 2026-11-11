@@ -68,8 +68,10 @@ except extraction (OCR), the review UI and the one-command runner.
 - `rc/checkpoint.py`  students and running totals; `apply_month()`; xlsx save/load. **Prizes are the levels a
   month's pages cross (previous < threshold <= new total), exactly what the certificate shows**; nothing is
   carried over, so a reported mistake is fixed by hand (edit the total, hand over the prize). A month is applied once and only after the previous one. Every student needs a teacher.
-- `rc/render.py`      print PDF: per teacher a cover page (prize tally + bagging checklist), then that
-  class's certificates (drawn by `make_certificates.draw_certificate`, unchanged). Letter landscape.
+- `rc/render.py`      print files: `certificates.pdf` = 2 per letter sheet, cut-and-stack per class (`cut_and_stack`: one cut,
+  bottom pile under top = list order), margin label "Teacher · k of n" in the trim area; `class-lists.pdf` = all classes'
+  bagging lists in two columns on as few pages as possible, school-wide prize count first, owed prizes marked.
+  Certificates drawn by `make_certificates.draw_certificate`, unchanged. `reprint --month M` redraws both from the log.
 - `rc/import_workbook.py` preferred one-time import: the master WORKBOOK (.xlsx). Totals = end of `--through`
   month from the month tabs (PRIMARY's running total can already include the next month, or miss one); chained rows
   = several sheets; stops at the "Prize | Level" stock table (a "Teacher" in the teacher column is a staff reader,

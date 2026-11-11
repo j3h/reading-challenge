@@ -148,9 +148,9 @@ def test_prizes_owed_from_earlier_are_bagged_and_recorded(tmp_path):
     assert not st.owed(TABLE)                                       # everything owed is now handed out
     given = [e for e in st.by_student["S0002"] if e.kind == "prizes_given" and "owed from earlier" in e.reason]
     assert len(given) == 1 and given[0].data["levels"] == [2500] and given[0].batch
-    pdf = pymupdf.open(m.folder.certificates)
-    cover_text = "".join(pdf[i].get_text() for i in range(pdf.page_count))
-    assert "Pen (owed)" in cover_text and "Park" in cover_text       # Io's class gets a cover page with no sheets
+    pdf = pymupdf.open(m.folder.class_lists)
+    lists = "".join(pdf[i].get_text() for i in range(pdf.page_count))
+    assert "Pen (owed)" in lists and "Park" in lists and "owed only" in lists   # Io's class is listed with no sheet
     runner.reopen_month(m, "Jamie")                                 # reopening un-gives them
     assert ev.EventLog(data).state().owed(TABLE)
 
@@ -167,3 +167,17 @@ def test_a_reopened_month_with_new_students_can_be_finished_again(data):
     st = ev.EventLog(data).state()
     zeds = [s for s in st.students.values() if s.name == "Zed Newcomer"]
     assert len(zeds) == 1 and zeds[0].total == 40 and not st.warnings
+
+
+def test_reprint_redraws_a_finished_month_from_the_log(data):
+    import pymupdf
+    m = month(data, "2026-10", [rec("oct.pdf", 1, "Ada Example", "Lopez", 30), rec("oct.pdf", 2, "Io Li", "Park", 150)])
+    m.finish(who="Jamie")
+    before = len(ev.EventLog(data).read())
+    first = [p.get_text() for p in pymupdf.open(m.folder.certificates)]
+    m.folder.certificates.unlink()
+    m.folder.class_lists.unlink()
+    runner.reprint(m)
+    assert [p.get_text() for p in pymupdf.open(m.folder.certificates)] == first
+    lists = pymupdf.open(m.folder.class_lists)[0].get_text()
+    assert "Pen" in lists and "Io Li" in lists and len(ev.EventLog(data).read()) == before   # no events change

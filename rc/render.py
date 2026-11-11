@@ -195,3 +195,160 @@ def render_print_pdf(results, month, out_path, table=None, owed_rows=()) -> list
     doc.save(str(out_path), garbage=4, deflate=True)
     doc.close()
     return warnings
+
+
+# ---------------------------------------------------------------------------- printing 2 per sheet, for a paper cutter
+# Letter portrait, two certificates per sheet (top and bottom half). Each class is its own run of sheets, laid out
+# "cut and stack": with S sheets, sheet i carries certificate i on top and S+i underneath, so one cut through the
+# class's stack and the bottom pile placed under the top pile gives the class in list order. A small label in the
+# side margin ("Barry · 7 of 12"), which is trimmed off with the edges, puts a dropped pile back together.
+SHEET_W, SHEET_H = 612, 792
+HALF_H = SHEET_H / 2
+CERT_H = HALF_H - 36                      # 1/4 inch clear above and below each certificate (printers can't print to the edge)
+CERT_W = CERT_H * PAGE_W / PAGE_H         # keeps the certificate's proportions
+CERT_X = (SHEET_W - CERT_W) / 2
+
+
+def cut_and_stack(n: int) -> list[tuple[int, int | None]]:
+    """[(top, bottom)] certificate indexes per sheet for n certificates: one cut, bottom pile under top pile."""
+    sheets = (n + 1) // 2
+    return [(i, sheets + i if sheets + i < n else None) for i in range(sheets)]
+
+
+def render_certificates_2up(results, month, out_path, table=None) -> list[str]:
+    """Write certificates two to a letter sheet, class by class, laid out for a paper cutter. Returns warnings."""
+    table = table or mc.load_levels()
+    label = ck.month_label(ck.month_key(month))
+    warnings: list[str] = []
+    singles = pymupdf.open()                       # each certificate on its own page first, exactly as designed
+    runs = []
+    for teacher, rs in ck.classrooms(results):
+        runs.append((teacher, singles.page_count, len(rs)))
+        for r in rs:
+            row = {"name": r.student.name, "pages": str(r.pages), "total_pages": str(r.student.total),
+                   "_default_month": label}
+            mc.draw_certificate(singles, row, [p[1] for p in r.prizes], warnings.append, table)
+    singles.subset_fonts()
+    singles = pymupdf.open("pdf", singles.tobytes())   # placing pages needs a finished document
+    out = pymupdf.open()
+    toc = []
+    for teacher, first, n in runs:
+        toc.append([1, f"{teacher} ({n})", out.page_count + 1])
+        for top, bottom in cut_and_stack(n):
+            sheet = out.new_page(width=SHEET_W, height=SHEET_H)
+            for half, idx in ((0, top), (1, bottom)):
+                if idx is None:
+                    continue
+                y0 = half * HALF_H + (HALF_H - CERT_H) / 2
+                sheet.show_pdf_page(pymupdf.Rect(CERT_X, y0, CERT_X + CERT_W, y0 + CERT_H), singles, first + idx)
+                tag = f"{teacher}  ·  {idx + 1} of {n}  ·  {label}"
+                sheet.insert_text((CERT_X / 2 + 3, y0 + CERT_H / 2 + 60), tag, fontsize=7, color=GREY, rotate=90)
+            for x0, x1 in ((18, 42), (SHEET_W - 42, SHEET_W - 18)):     # where to cut
+                sheet.draw_line((x0, HALF_H), (x1, HALF_H), color=GREY, width=0.5)
+    if toc:
+        out.set_toc(toc)
+    out.subset_fonts()
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    out.save(str(out_path), garbage=4, deflate=True)
+    return warnings
+
+
+# ---------------------------------------------------------------------------- the class lists, all together
+LIST_MARGIN = 36
+LIST_GAP = 18
+LIST_COL_W = (SHEET_W - 2 * LIST_MARGIN - LIST_GAP) / 2
+LIST_TOP, LIST_BOTTOM = 30, SHEET_H - 28
+LIST_SIZE, LIST_LINE = 8.0, 9.1
+
+
+def render_class_lists(results, month, out_path, owed_rows=()) -> list[str]:
+    """Every class's bagging list on as few letter pages as possible (two columns), with the whole school's prize
+    count first, for pulling prizes from stock. Prizes owed from earlier months are included, marked "(owed)"."""
+    label = ck.month_label(ck.month_key(month))
+    doc = pymupdf.open()
+    warnings: list[str] = []
+    owed = {s.id: lv for s, lv in owed_rows}
+    classes = dict(ck.classrooms(results))
+    for s, _ in owed_rows:
+        classes.setdefault(s.teacher, [])
+
+    state = {"page": None, "t": None, "col": 0, "y": 0.0}
+
+    def new_page():
+        page = doc.new_page(width=SHEET_W, height=SHEET_H)
+        state.update(page=page, t=mc.Typesetter(page, doc), col=0, y=LIST_TOP)
+
+    def x0():
+        return LIST_MARGIN + state["col"] * (LIST_COL_W + LIST_GAP)
+
+    def need(h, continuing=False):
+        """Make room for h points in the current column (next column, or next page). A class that carries on in
+        the new column gets its teacher's name again."""
+        if state["y"] + h <= LIST_BOTTOM:
+            return
+        if state["col"] == 0:
+            state.update(col=1, y=state["top"])
+        else:
+            new_page()
+            state["top"] = LIST_TOP
+        if continuing and state.get("teacher"):
+            _text(state["t"], x0(), state["y"] + 2, f"{state['teacher']} (continued)", 9, "name", mc.NAME_COLOR)
+            state["y"] += 2 + LIST_LINE + 2
+
+    new_page()
+    t = state["t"]
+    _text(t, LIST_MARGIN, LIST_TOP + 12, f"Reading Challenge  ·  {label}  ·  class lists for bagging", 13, "body")
+    tally = prize_tally(results, owed_rows)
+    y = LIST_TOP + 30
+    lines = _wrap_items(t, [f"{n} × {item}" for item, n in tally], SHEET_W - 2 * LIST_MARGIN, 9) if tally else ["none"]
+    _text(t, LIST_MARGIN, y, "Prizes to pull from stock, whole school:", 9, color=GREY)
+    y += 12
+    for line in lines:
+        _text(t, LIST_MARGIN, y, line, 9)
+        y += 11.5
+    state["page"].draw_line((LIST_MARGIN, y), (SHEET_W - LIST_MARGIN, y), color=RULE, width=0.8)
+    state.update(y=y + 16, top=y + 16)
+
+    for teacher in sorted(classes, key=str.lower):
+        rs = classes[teacher]
+        seen = {r.student.id for r in rs}
+        rows = sorted(list(rs) + [ck.Result(s, None, s.total, ()) for s, _ in owed_rows
+                                  if s.teacher == teacher and s.id not in seen], key=lambda r: r.student.name.lower())
+        state["teacher"] = ""
+        need(LIST_LINE * 3)                                     # a class heading never sits alone at a column foot
+        state["teacher"] = teacher
+        t, page = state["t"], state["page"]
+        state["y"] += 2
+        _text(t, x0(), state["y"], teacher, 10.5, "name", mc.NAME_COLOR)
+        n_cert = len(rs)
+        _right(t, x0() + LIST_COL_W, state["y"], f"{n_cert} certificate{'s' if n_cert != 1 else ''}", 8, GREY)
+        state["y"] += 5
+        page.draw_line((x0(), state["y"]), (x0() + LIST_COL_W, state["y"]), color=RULE, width=0.6)
+        state["y"] += LIST_LINE
+        for r in rows:
+            s = r.student
+            items = [p[2] for p in r.prizes] + [f"{p[2]} (owed)" for p in owed.get(s.id, [])]
+            t = state["t"]
+            name_lines, size = _wrap_name(t, s.name, LIST_COL_W - 70, LIST_SIZE)
+            prize_lines = _wrap_items(t, items, LIST_COL_W - 14, LIST_SIZE - 0.5) if items else []
+            h = (len(name_lines) + len(prize_lines)) * LIST_LINE + 2
+            need(h, continuing=True)
+            t, page, x = state["t"], state["page"], x0()
+            y = state["y"]
+            page.draw_rect(pymupdf.Rect(x, y - 7, x + 7, y), color=mc.BLACK, width=0.6)
+            for i, ln in enumerate(name_lines):
+                _text(t, x + 12, y + i * LIST_LINE, ln, size)
+            _right(t, x + LIST_COL_W, y, f"{r.pages:,} pp" if r.pages is not None else "owed only",
+                   LIST_SIZE - 0.5, GREY)
+            y += len(name_lines) * LIST_LINE
+            for ln in prize_lines:
+                _text(t, x + 12, y, ln, LIST_SIZE - 0.5, color=(0.15, 0.3, 0.55))
+                y += LIST_LINE
+            state["y"] = y + 2
+        state["y"] += 5
+    doc.subset_fonts()
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    doc.save(str(out_path), garbage=4, deflate=True)
+    if doc.page_count > 1:
+        warnings.append(f"class lists take {doc.page_count} pages")
+    return warnings
