@@ -196,14 +196,16 @@ def replay(events) -> State:
     reported in `warnings`, so one bad line never hides the rest."""
     st = State()
     events = sorted({e.id: e for e in events}.values(), key=_order)        # a duplicated id counts once
+    voided = {e.data["event"] for e in events if e.kind == "event_voided"}
     first: dict[str, Event] = {}
     distinct = []
-    for e in events:                                   # so does the same evidence counted twice
+    for e in events:                                   # so does the same evidence counted twice ...
         if dedupable(e) and e.fingerprint in first:
             st.duplicates.append((e, first[e.fingerprint]))
-        else:
-            first[e.fingerprint] = e
-            distinct.append(e)
+            continue
+        if e.id not in voided:                         # ... but only a change that still counts can make
+            first.setdefault(e.fingerprint, e)         # another a duplicate (re-finishing a reopened month
+        distinct.append(e)                             # records the same evidence again, on purpose)
     st.events = events = distinct
     st.voided = {e.data["event"] for e in events if e.kind == "event_voided"}
     last_set: dict = {}
@@ -405,7 +407,8 @@ class EventLog:
         for e in new:
             validate_shape(e)
         existing = self.read()
-        known = {e.id for e in existing} | {e.fingerprint for e in existing if dedupable(e)}
+        live = replay(existing)
+        known = {e.id for e in existing} | {e.fingerprint for e in live.events if dedupable(e) and e.id not in live.voided}
         after = replay(existing + new)
         bad = [w for w in after.warnings if w not in replay(existing).warnings]
         if bad:

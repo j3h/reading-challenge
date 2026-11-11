@@ -153,3 +153,17 @@ def test_prizes_owed_from_earlier_are_bagged_and_recorded(tmp_path):
     assert "Pen (owed)" in cover_text and "Park" in cover_text       # Io's class gets a cover page with no sheets
     runner.reopen_month(m, "Jamie")                                 # reopening un-gives them
     assert ev.EventLog(data).state().owed(TABLE)
+
+
+def test_a_reopened_month_with_new_students_can_be_finished_again(data):
+    m = month(data, "2026-10", [rec("oct.pdf", 1, "Zed Newcomer", "Moren", 40), rec("oct.pdf", 2, "Io Li", "Park", 10)],
+              {"oct.pdf#1": {"new_student": {"name": "Zed Newcomer", "teacher": "Moren", "grade": "1"}}})
+    m.finish(who="Jamie")
+    runner.reopen_month(m, "Jamie", "fixing something else")
+    for p in (m.folder.checkpoint, m.folder.certificates, m.folder.summary):
+        p.unlink()
+    text = m.finish(who="Jamie")                 # the same new student, from the same sheet, recorded again
+    assert "Checks: all passed" in text
+    st = ev.EventLog(data).state()
+    zeds = [s for s in st.students.values() if s.name == "Zed Newcomer"]
+    assert len(zeds) == 1 and zeds[0].total == 40 and not st.warnings
