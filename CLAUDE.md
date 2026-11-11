@@ -121,7 +121,10 @@ turns that month's rows (by the "Month" answer) into SheetRecords (file#row, gra
 any sheet (`Month.records`), with source {"form", "row", "submitted"}. The app's Students page (`Home.students/student/
 adjust`) lists children, shows each one's timeline with sources and cancellations, and records corrections (reason
 required) via `events.adjustment_events`. Prizes owed (crossed, never given) are bagged at the next finish: on the
-cover pages marked "(owed)", in the summary, and recorded as `prizes_given`. Raw data: `Home.prunable/let_go` offer (never automatic) to move scans, photos, form CSVs
+cover pages marked "(owed)", in the summary, and recorded as `prizes_given`. Teacher grades: `teacher_grade_set` events (`State.teacher_grades`); a new student with no
+grade takes the teacher's, a class change in review adds a `grade_set` to the new class's grade; the app's Teachers page
+sets them and can align a class. A child's page has a by-month table (`Home.student()["months"]`: pages, total, prizes,
+sheet links while the scan is kept, `jump` when a total was set in between). Raw data: `Home.prunable/let_go` offer (never automatic) to move scans, photos, form CSVs
 and cached readings of finished months older than `keep_raw_months` (Settings, default 6) to the Trash; the month
 keeps its outputs, records.json and decisions, and notes the removal in `work/removed.txt`.
 

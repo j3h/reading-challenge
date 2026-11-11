@@ -289,3 +289,47 @@ def test_old_months_scans_can_be_let_go_and_nothing_else(data, monkeypatch):
     assert home.month_status("2026-10")["finished"]                    # still a finished month
     with pytest.raises(ck.CheckpointError, match="at least 1"):
         home.set_keep_raw(0)
+
+
+def test_teachers_page_sets_grades_and_aligns_a_class(tmp_path):
+    from rc import events as ev
+    data = tmp_path / "evdata"
+    data.mkdir()
+    log = ev.EventLog(data, "mac")
+    src = ({"workbook": "m.xlsx", "tab": "Sept", "row": 2},)
+    log.append([ev.Event("student_added", {"student": f"S{i}", "name": f"Kid {i}", "teacher": "Hunt", "grade": g},
+                         "Josh", "", src, f"2026-09-28T12:00:0{i}+00:00") for i, g in enumerate(["K", "K", "1"])])
+    home = app_mod.Home(data)
+    t = home.teachers()["teachers"]
+    assert t == [{"teacher": "Hunt", "grade": "", "students": 3, "grades": [("K", 2), ("1", 1)], "off": 0}]
+    settings.save({"who": "Jamie"})
+    t = home.set_teacher_grade("Hunt", "1")["teachers"][0]
+    assert t["grade"] == "1" and t["off"] == 2
+    t = home.set_teacher_grade("Hunt", "1", align=True)["teachers"][0]
+    assert t["off"] == 0 and t["grades"] == [("1", 3)]
+    reasons = {e.reason for e in log.state().events if e.kind == "grade_set"}
+    assert reasons == {"Hunt's class is grade 1"}
+    with pytest.raises(ck.CheckpointError, match="nothing to change"):
+        home.set_teacher_grade("Hunt", "1", align=True)
+
+
+def test_a_students_page_has_a_row_per_month_with_links_to_kept_sheets(tmp_path):
+    from rc import events as ev
+    data = tmp_path / "evdata"
+    (data / "2026-27" / "2026-10" / "scans").mkdir(parents=True)
+    (data / "2026-27" / "2026-10" / "scans" / "oct.pdf").write_bytes(pdf_bytes(1))
+    log = ev.EventLog(data, "mac")
+    log.append([ev.Event("student_added", {"student": "S1", "name": "Ada Example", "teacher": "Lopez", "grade": "2"},
+                         "Josh", "", (), "2026-09-28T12:00:00+00:00"),
+                ev.Event("pages_recorded", {"student": "S1", "month": "2026-09", "pages": 120}, "Josh", "",
+                         ({"workbook": "m.xlsx", "tab": "Sept", "row": 4},), "2026-09-28T12:00:01+00:00"),
+                ev.Event("pages_recorded", {"student": "S1", "month": "2026-10", "pages": 30}, "Jamie", "",
+                         ({"scan": "oct.pdf", "page": 1},), "2026-11-03T12:00:00+00:00"),
+                ev.Event("prizes_given", {"student": "S1", "month": "2026-10", "levels": [100]}, "Jamie", "",
+                         ({"scan": "oct.pdf", "page": 1},), "2026-11-03T12:00:01+00:00")])
+    months = app_mod.Home(data).student("S1")["months"]
+    assert [(m["label"], m["pages"], m["total"], m["prizes"]) for m in months] == \
+        [("October 2026", 30, 150, ["Pencil and Stickers"]), ("September 2026", 120, 120, [])]
+    assert months[0]["sheets"] == [{"text": "oct.pdf p. 1", "month": "2026-10", "key": "oct.pdf#1"}]
+    assert months[1]["sheets"][0]["key"] == ""                       # a workbook row has no picture
+    assert [m["jump"] for m in months] == [0, 0]

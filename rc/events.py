@@ -31,6 +31,8 @@ Event kinds (data fields):
     prizes_given       student, month, levels        level thresholds handed out
     event_voided       event                         cancels another event; needs a reason
     month_finished     month                         a month was finished (which Mac, when)
+    teacher_grade_set  teacher, grade                the grade a teacher's class is (new students and class changes
+                                                     take it; changeable, e.g. a teacher moving grades next year)
 
 `sources` is a list of dicts saying where an event came from, e.g. {"scan": "oct.pdf", "page": 12},
 {"photo": "emailed 1.jpg"}, {"form": "Responses", "submitted": "2026-11-02 16:11"},
@@ -63,6 +65,7 @@ KINDS = {
     "prizes_given": ("student", "month", "levels"),
     "event_voided": ("event",),
     "month_finished": ("month",),
+    "teacher_grade_set": ("teacher", "grade"),
 }
 NEEDS_REASON = {"total_set", "pages_adjusted", "event_voided"}
 SETTERS = {"name_set": "name", "teacher_set": "teacher", "grade_set": "grade"}
@@ -135,6 +138,7 @@ class Event:
             "prizes_given": lambda: f"prizes handed out: {', '.join(f'{t:,}' for t in d['levels'])}",
             "event_voided": lambda: f"cancelled event {d['event'][:8]}",
             "month_finished": lambda: f"{ck.month_label(d['month'])} finished",
+            "teacher_grade_set": lambda: f"{d['teacher']}'s class is grade {d['grade'] or '(none)'}",
         }[self.kind]()
         return text + (f" - {self.reason}" if self.reason else "")
 
@@ -166,6 +170,7 @@ class State:
     month_pages: dict = field(default_factory=dict)           # (id, month) -> pages (after adjustments)
     prizes_given: dict = field(default_factory=dict)          # id -> set of thresholds
     finished: dict = field(default_factory=dict)              # month -> month_finished event
+    teacher_grades: dict = field(default_factory=dict)        # teacher -> grade (latest teacher_grade_set)
     voided: set = field(default_factory=set)
     by_student: dict = field(default_factory=dict)            # id -> [Event] (live and voided, time order)
     warnings: list = field(default_factory=list)
@@ -228,6 +233,12 @@ def _apply(st: State, e: Event, last_set: dict) -> None:
             st.warnings.append(f"{ck.month_label(d['month'])} was finished on two Macs "
                                f"({st.finished[d['month']].device}, {e.device}): check for double counting")
         st.finished.setdefault(d["month"], e)
+        return
+    if e.kind == "teacher_grade_set":
+        if d["grade"].strip():
+            st.teacher_grades[d["teacher"].strip()] = d["grade"].strip()
+        else:
+            st.teacher_grades.pop(d["teacher"].strip(), None)
         return
     if e.kind == "student_added":
         if sid in st.students:

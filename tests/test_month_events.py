@@ -181,3 +181,38 @@ def test_reprint_redraws_a_finished_month_from_the_log(data):
     assert [p.get_text() for p in pymupdf.open(m.folder.certificates)] == first
     lists = pymupdf.open(m.folder.certificates)[0].get_text()
     assert "Pen" in lists and "Io Li" in lists and len(ev.EventLog(data).read()) == before   # no events change
+
+
+def _grade(log, teacher, grade):
+    log.append([ev.Event("teacher_grade_set", {"teacher": teacher, "grade": grade}, "Jamie", "", ({"manual": True},))])
+
+
+def test_teacher_grades_fill_new_students_and_follow_class_changes(data):
+    log = ev.EventLog(data, "jamies-mac")
+    _grade(log, "Moren", "3")
+    _grade(log, "Park", "4")
+    assert log.state().teacher_grades == {"Moren": "3", "Park": "4"}
+    m = month(data, "2026-10", [rec("oct.pdf", 1, "Zed Newcomer", "Moren", 40), rec("oct.pdf", 2, "Ada Example", "Park", 30)],
+              {"oct.pdf#1": {"new_student": {"name": "Zed Newcomer", "teacher": "Moren", "grade": ""}},
+               "oct.pdf#2": {"student": "S0001", "teacher": "Park", "pages": 30}})
+    cp, _ = m.previous()
+    sug = rv.suggest(rv.plan([rec("x.pdf", 1, "Someone New", "Moren", 5)], cp, "2026-10", {}), cp, {}, {"Moren": "3"})
+    assert sug["x.pdf#1"].draft["new_student"]["grade"] == "3"
+    m.finish(who="Jamie")
+    st = log.state()
+    zed = next(s for s in st.students.values() if s.name == "Zed Newcomer")
+    assert zed.grade == "3"                                           # the sheet gave none: Moren's class is grade 3
+    ada = st.students["S0001"]
+    assert (ada.teacher, ada.grade) == ("Park", "4")                  # moved class, took the class's grade
+    moved = next(e for e in st.by_student["S0001"] if e.kind == "grade_set")
+    assert "moved to Park's class (grade 4)" in moved.reason
+
+
+def test_a_teacher_moving_grades_keeps_the_history(data):
+    log = ev.EventLog(data, "jamies-mac")
+    _grade(log, "Park", "3")
+    _grade(log, "Park", "4")
+    st = log.state()
+    assert st.teacher_grades["Park"] == "4"
+    assert [e.describe() for e in st.events if e.kind == "teacher_grade_set"] == \
+        ["Park's class is grade 3", "Park's class is grade 4"]

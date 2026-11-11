@@ -76,6 +76,7 @@
   <h1>Reading Challenge</h1>
   <button id="monthsBtn" hidden>Months</button>
   <button id="studentsBtn">Students</button>
+  <button id="teachersBtn">Teachers</button>
   <button id="settingsBtn">Settings</button>
   <button id="quitBtn" title="Stop the app (nothing is lost)">Quit</button>
 </header>
@@ -84,7 +85,7 @@
 <script>
 "use strict";
 const TOKEN = "__TOKEN__";
-let state = null, showSettings = false, uploading = "", polling = null, people = null, person = null, filter = "";
+let state = null, showSettings = false, uploading = "", polling = null, people = null, person = null, filter = "", classes = null;
 const $ = (id) => document.getElementById(id);
 function el(tag, attrs, ...kids) {              // text only: nothing is ever parsed as HTML
   const e = document.createElement(tag);
@@ -210,7 +211,28 @@ async function upload(month, files) {
 
 // ---------------------------------------------------------------- students: history and corrections
 const route = () => location.hash.startsWith("#student=") ? ["student", decodeURIComponent(location.hash.slice(9))]
-                  : location.hash === "#students" ? ["students"] : ["months"];
+                  : location.hash === "#students" ? ["students"] : location.hash === "#teachers" ? ["teachers"] : ["months"];
+
+function teachersView() {
+  if (!classes) { api("/api/home/teachers").then((d) => { classes = d; render(); }).catch((e) => fail(e.message)); return [el("div", { class: "card" }, "Loading…")]; }
+  const save = async (t, input, align) => {
+    try { classes = await api("/api/home/teacher_grade", { teacher: t.teacher, grade: input.value, align }); people = null; render(); }
+    catch (e) { fail(e.message); }
+  };
+  return [el("div", { class: "card" }, el("h2", {}, "Teachers"),
+    el("p", { class: "muted" }, "Each class's grade. A new student takes their teacher's grade, and a student who moves class takes the new class's grade. Change it when a teacher moves grades (usually between years); every change is kept with your name."),
+    el("table", { class: "list" }, el("thead", {}, el("tr", {}, ["Teacher", "Grade", "Students", "Grades they have now", ""].map((h) => el("th", {}, h)))),
+      el("tbody", {}, classes.teachers.map((t) => {
+        const input = el("input", { value: t.grade, size: 4, placeholder: "?" });
+        return el("tr", {},
+          el("td", {}, t.teacher), el("td", {}, input), el("td", { class: "num" }, t.students),
+          el("td", { class: "muted" }, t.grades.map(([g, n]) => `${g === "?" ? "none" : "grade " + g} × ${n}`).join(", ")),
+          el("td", {}, el("div", { class: "row" },
+            el("button", { onclick: () => save(t, input, false) }, "Save"),
+            t.off ? el("button", { onclick: () => confirm(`Set grade ${t.grade} for the ${t.off} student(s) in ${t.teacher}'s class whose grade is different?`) && save(t, { value: t.grade }, true) },
+              `Set ${t.off} student${t.off > 1 ? "s" : ""} to grade ${t.grade}`) : null)));
+      }))))];
+}
 
 async function loadPeople() {
   try { people = await api("/api/home/students"); } catch (e) { people = { students: [], problems: [e.message] }; }
@@ -267,6 +289,17 @@ function studentView(id) {
         s.also ? el("span", { class: "muted" }, ` · also called ${s.also}`) : null),
       s.owed.length ? el("p", { class: "owed" }, "Owed (crossed but never handed out): " + s.owed.join(", ")) : null,
       s.notes ? el("p", { class: "muted" }, s.notes) : null),
+    el("div", { class: "card" }, el("h2", {}, "By month"),
+      person.months.length ? el("table", { class: "list" },
+        el("thead", {}, el("tr", {}, ["Month", "Pages", "Total after", "Prizes", "Sheets"].map((h) => el("th", {}, h)))),
+        el("tbody", {}, person.months.map((m) => el("tr", {},
+          el("td", {}, m.label), el("td", { class: "num" }, fmt(m.pages), m.adjusted ? el("span", { class: "muted", title: "includes a correction" }, " *") : null),
+          el("td", { class: "num" }, m.total == null ? "" : fmt(m.total),
+            m.jump ? el("span", { class: "owed", title: `The total was set to a different number before this month (${m.jump > 0 ? "+" : ""}${fmt(m.jump)}): see History for why` }, ` (${m.jump > 0 ? "+" : ""}${fmt(m.jump)})`) : null),
+          el("td", {}, m.prizes.join(", ")),
+          el("td", {}, m.sheets.map((sh, i) => [i ? ", " : "", sh.key
+            ? el("a", { href: `/scan?m=${encodeURIComponent(sh.month)}&key=${encodeURIComponent(sh.key)}&t=${TOKEN}`, target: "_blank", rel: "noopener", title: "See the sheet" }, sh.text)
+            : el("span", { class: "muted" }, sh.text)]).flat()))))) : el("p", { class: "muted" }, "No reading recorded yet.")),
     el("div", { class: "card" }, el("h2", {}, "Make a correction"),
       el("p", { class: "muted" }, "Change only what is wrong. Every change is recorded with your name and the reason; nothing is overwritten."),
       el("datalist", { id: "teacherlist" }, person.teachers.map((t) => el("option", { value: t }))),
@@ -289,9 +322,9 @@ function studentView(id) {
 function render() {
   const app = $("app");
   const [view, arg] = route();
-  $("monthsBtn").hidden = view === "months"; $("studentsBtn").hidden = view !== "months";
+  $("monthsBtn").hidden = view === "months"; $("studentsBtn").hidden = view === "students"; $("teachersBtn").hidden = view === "teachers";
   if (view !== "months" && state.folder_ok) {
-    app.replaceChildren(...(view === "students" ? studentsView() : studentView(arg)));
+    app.replaceChildren(...(view === "students" ? studentsView() : view === "teachers" ? teachersView() : studentView(arg)));
     return;
   }
   if (!state.folder_ok || !state.api_key || !state.who) {
@@ -332,6 +365,7 @@ function months() {
 
 $("settingsBtn").addEventListener("click", () => { showSettings = !showSettings; location.hash = ""; render(); });
 $("studentsBtn").addEventListener("click", () => { location.hash = "#students"; });
+$("teachersBtn").addEventListener("click", () => { classes = null; location.hash = "#teachers"; });
 $("monthsBtn").addEventListener("click", () => { location.hash = ""; });
 window.addEventListener("hashchange", () => { if (route()[0] === "students") people = null; render(); });
 $("quitBtn").addEventListener("click", async () => {

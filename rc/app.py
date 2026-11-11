@@ -330,10 +330,81 @@ class Home:
                              "sources": [ev.describe_source(x) for x in e.sources],
                              "cancelled": bool(v), "cancelled_by": v.who if v else "",
                              "cancel_reason": v.reason if v else ""})
-        return {"student": {"id": s.id, "name": s.name, "teacher": s.teacher, "grade": s.grade, "total": s.total,
+        # one row per month: pages, total after, prizes, and the sheets (with a link while the scan is kept)
+        months: dict = {}
+        for e in st.by_student.get(sid, []):
+            if e.id in st.voided or e.kind not in ("pages_recorded", "pages_adjusted", "prizes_given"):
+                continue
+            if e.kind == "prizes_given" and e.reason.startswith("assumed handed out"):
+                continue                     # the import's bookkeeping, not something that happened that month
+            row = months.setdefault(e.data["month"], {"month": e.data["month"], "label": ck.month_label(e.data["month"]),
+                                                      "pages": 0, "total": None, "prizes": [], "sheets": [],
+                                                      "adjusted": False})
+            if e.kind == "prizes_given":
+                level = {t: p for t, _, p in mc.load_levels()}
+                row["prizes"] += [level.get(t, f"{t:,}") for t in e.data["levels"]]
+                continue
+            row["pages"] += e.data.get("pages", e.data.get("delta", 0))
+            row["adjusted"] |= e.kind == "pages_adjusted"
+            for src in e.sources:
+                row["sheets"].append(self._sheet_link(e.data["month"], src))
+        for h in st.history:
+            if h.student_id == sid and h.month in months:
+                months[h.month]["total"] = h.total_after
+        rows = sorted(months.values(), key=lambda r: r["month"])
+        previous = 0
+        for r in rows:                      # a total set outright in between (import gap, correction) shows as a jump
+            r["jump"] = (r["total"] - r["pages"] - previous) if r["total"] is not None else 0
+            previous = r["total"] if r["total"] is not None else previous
+        return {"months": rows[::-1],
+                "student": {"id": s.id, "name": s.name, "teacher": s.teacher, "grade": s.grade, "total": s.total,
                             "notes": s.notes, "also": s.nicknames,
                             "owed": [f"{p} ({t:,})" for t, _, p in st.owed(mc.load_levels()).get(sid, [])]},
                 "timeline": timeline[::-1], "teachers": sorted({x.teacher for x in st.students.values() if x.teacher})}
+
+    # ------------------------------------------------------------------ teachers and their grades
+    def teachers(self) -> dict:
+        """Every class: its grade (if set), how many students, and the grades its students have now."""
+        from collections import Counter
+        st = self._log().state()
+        classes: dict = {}
+        for s in st.students.values():
+            if s.status == ck.ACTIVE and s.teacher:
+                classes.setdefault(s.teacher, []).append(s)
+        for t in st.teacher_grades:
+            classes.setdefault(t, [])
+        out = []
+        for t in sorted(classes, key=str.lower):
+            grades = Counter(s.grade or "?" for s in classes[t])
+            grade = st.teacher_grades.get(t, "")
+            out.append({"teacher": t, "grade": grade, "students": len(classes[t]),
+                        "grades": sorted(grades.items(), key=lambda kv: -kv[1]),
+                        "off": sum(1 for s in classes[t] if grade and s.grade != grade)})
+        return {"teachers": out}
+
+    def set_teacher_grade(self, teacher: str, grade: str, align: bool = False, reason: str = "") -> dict:
+        """Record a class's grade; with `align`, also set it for every student in the class whose grade differs."""
+        from rc import events as ev
+        log = self._log()
+        who = settings.who()
+        if not who:
+            raise ck.CheckpointError("add your name in Settings first: it is recorded on every change")
+        teacher, grade = " ".join(str(teacher).split()), " ".join(str(grade).split())
+        if not teacher:
+            raise ck.CheckpointError("which teacher?")
+        st = log.state()
+        manual = ({"manual": True},)
+        new = []
+        if st.teacher_grades.get(teacher, "") != grade:
+            new.append(ev.Event("teacher_grade_set", {"teacher": teacher, "grade": grade}, who, reason.strip(), manual))
+        if align and grade:
+            why = reason.strip() or f"{teacher}'s class is grade {grade}"
+            new += [ev.Event("grade_set", {"student": s.id, "grade": grade}, who, why, manual)
+                    for s in st.students.values() if s.teacher == teacher and s.status == ck.ACTIVE and s.grade != grade]
+        if not new:
+            raise ck.CheckpointError("nothing to change")
+        log.append(new)
+        return self.teachers()
 
     def adjust(self, sid: str, change: dict) -> dict:
         from rc import events as ev
@@ -416,6 +487,20 @@ class Home:
             raise ck.CheckpointError("keep at least 1 month")
         settings.save({"keep_raw_months": months})
         return self.state()
+
+    def _sheet_link(self, month: str, src: dict) -> dict:
+        """{text, month, key}: key is set when the sheet's image is still in that month's folder."""
+        from rc import events as ev
+        text = ev.describe_source(src)
+        key = ""
+        if "scan" in src or "photo" in src:
+            file = src.get("scan") or src.get("photo")
+            try:
+                if (self.month(month).folder.scans / file).exists():
+                    key = f"{file}#{src.get('page', 1)}"
+            except ck.CheckpointError:
+                pass
+        return {"text": text, "month": month, "key": key}
 
     def show_in_finder(self, month: str | None = None, what: str = "folder") -> None:
         if sys.platform != "darwin":

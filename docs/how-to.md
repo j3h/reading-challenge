@@ -48,8 +48,22 @@ To fix something, fill in only what's wrong under **Make a correction**, say why
 Nothing is overwritten: the history shows the old value, the change, who and why. **Cancel** on any line undoes it
 (it stays in the history, crossed out).
 
+**By month** at the top of a child's page shows each month's pages, total and prizes, with a link to see the
+actual sheet while it's still kept. A total shown with a (+number) was set to a different number just before that
+month; History says why.
+
+While reviewing a sheet, the open row shows that child's last few months and total, with **History →** to open their
+page in a new tab.
+
 If a correction means a child has passed a prize level they never got, the prize is listed as **owed** and goes on
 next month's cover page for their class, marked "(owed)".
+
+## Teachers and grades
+
+**Teachers** (top right) lists every class with its grade. A new student gets their teacher's grade, and a child who
+moves class gets the new class's grade, so set each teacher's grade at the start of the year (or when a teacher
+changes grades). The list shows the grades the children in each class have now; **Set N students to grade X** brings
+the odd ones out into line, with the change kept in each child's history.
 
 ## If something was wrong
 

@@ -398,9 +398,11 @@ def teacher_guess(written: str, teachers) -> str:
     return next((t for t in teachers if mt.teacher_agreement(written, t) == "agree"), "")
 
 
-def suggest(p: Plan, cp: ck.Checkpoint, decisions: dict) -> dict[str, Suggestion]:
-    """A suggested decision for every sheet that still has a question."""
-    teachers = sorted({s.teacher for s in cp.students.values() if s.teacher})
+def suggest(p: Plan, cp: ck.Checkpoint, decisions: dict, teacher_grades: dict | None = None) -> dict[str, Suggestion]:
+    """A suggested decision for every sheet that still has a question. `teacher_grades` (teacher -> grade) fills in
+    a new student's grade when the sheet doesn't say."""
+    teacher_grades = teacher_grades or {}
+    teachers = sorted({s.teacher for s in cp.students.values() if s.teacher} | set(teacher_grades))
     by_key: dict[str, list] = {}
     for i in p.issues:
         by_key.setdefault(i.key, []).append(i)
@@ -428,7 +430,7 @@ def suggest(p: Plan, cp: ck.Checkpoint, decisions: dict) -> dict[str, Suggestion
                 why = f"added as new from {p.pending[best.student.id].notes.split('from ')[-1]}; {best.reason}"
             reasons.append(why + (f"; could also be {others[0].student.name}" if others else ""))
         else:
-            d["new_student"] = {"name": rec.name, "teacher": guess, "grade": rec.grade}
+            d["new_student"] = {"name": rec.name, "teacher": guess, "grade": rec.grade or teacher_grades.get(guess, "")}
             reasons.append("not on the roster: add as a new student")
             if not guess:
                 complete = False

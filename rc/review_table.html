@@ -305,6 +305,11 @@ function openRow(s) {
   }
   studentStack.append(finder, el("datalist", { id: "rosterlist" }, state.roster.map((p) => el("option", { value: `${p.name} (${p.teacher || "no teacher"})` }))));
   const pickedNew = f.mode === "student" && (state.roster.find((x) => x.id === f.student) || {}).new_from;
+  const picked = f.mode === "student" && state.roster.find((x) => x.id === f.student);
+  if (picked && !picked.new_from) studentStack.append(el("div", { class: "hint" },
+    picked.recent.length ? picked.recent.map(([m, n]) => `${m}: ${fmt(n)}`).join(" · ") : "no earlier sheets",
+    ` · total ${fmt(picked.total)} · `,
+    MONTH ? el("a", { href: "/#student=" + encodeURIComponent(picked.id), target: "_blank", rel: "noopener" }, "History →") : null));
   if (f.mode === "student" && r.name && !pickedNew) {
     const p = state.roster.find((x) => x.id === f.student);
     if (p && p.name.toLowerCase() !== r.name.trim().toLowerCase())
@@ -313,7 +318,10 @@ function openRow(s) {
   // teacher
   const isOther = f.otherTeacher || (f.teacher && !state.teachers.includes(f.teacher));
   const teacherStack = el("div", { class: "stack" }, el("select", { disabled: !!pickedNew, title: pickedNew ? `Set on ${pickedNew}, where they were added` : "",
-      onchange: (e) => { f.otherTeacher = e.target.value === "__other"; f.teacher = f.otherTeacher ? "" : e.target.value; render(); } },
+      onchange: (e) => { f.otherTeacher = e.target.value === "__other"; f.teacher = f.otherTeacher ? "" : e.target.value;
+        const g = (state.teacher_grades || {})[f.teacher];      // a new student takes the class's grade
+        if (f.mode !== "student" && g && !String(f.new.grade || "").trim()) f.new.grade = g;
+        render(); } },
     el("option", { value: "" }, "Choose…"),
     state.teachers.map((t) => el("option", { value: t, selected: !isOther && t === f.teacher }, t)),
     el("option", { value: "__other", selected: isOther }, "Someone else…")),

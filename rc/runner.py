@@ -33,6 +33,10 @@ class Month:
         self.log = ev.EventLog(workspace.root)
 
     # ---- inputs
+    def teacher_grades(self) -> dict:
+        """teacher -> grade from the log (empty for folders without one)."""
+        return self.log.state().teacher_grades if self.uses_events() else {}
+
     def uses_events(self) -> bool:
         """A data folder with an event log keeps everything there; older folders use checkpoint files."""
         return self.log.has_students()
@@ -126,7 +130,8 @@ class Month:
         if owed:
             notes = notes + [f"owed from earlier, bagged now: {new_cp.students[sid].name}: "
                              + ", ".join(f"{p} ({t:,})" for t, _, p in lv) for sid, lv in owed.items()]
-        events = month_events(p, before, cp_with_new, results, self.folder.month, who, owed) if events_mode else []
+        events = month_events(p, before, cp_with_new, results, self.folder.month, who, owed,
+                              state.teacher_grades if events_mode else {}) if events_mode else []
         if events_mode:                       # the log, replayed, must say exactly what this month computed
             replayed = ev.replay(self.log.read() + events)
             bad = [r.student.name for r in results if replayed.students[r.student.id].total != r.student.total]
@@ -209,7 +214,7 @@ def reopen_month(m: "Month", who: str, reason: str = "") -> int:
 
 
 def month_events(p: rv.Plan, before: ck.Checkpoint, with_new: ck.Checkpoint, results, month: str,
-                 who: str, owed: dict | None = None) -> list[ev.Event]:
+                 who: str, owed: dict | None = None, teacher_grades: dict | None = None) -> list[ev.Event]:
     """What finishing a month adds to the log, each change pointing at the sheet(s) it came from. All share one
     batch id (the month_finished event's), so reopening the month cancels exactly these."""
     import datetime as dt
@@ -218,6 +223,7 @@ def month_events(p: rv.Plan, before: ck.Checkpoint, with_new: ck.Checkpoint, res
     # their pages)
     tick = lambda: (start + dt.timedelta(microseconds=len(out))).isoformat(timespec="microseconds")
     out: list[ev.Event] = []
+    grades = teacher_grades or {}
     finish = ev.Event("month_finished", {"month": month, "sheets": len(p.settled)}, who, "", (), tick())
     batch = finish.id
     out.append(ev.Event(finish.kind, finish.data, who, "", (), finish.time, "", finish.id, batch))
@@ -232,12 +238,17 @@ def month_events(p: rv.Plan, before: ck.Checkpoint, with_new: ck.Checkpoint, res
             continue
         if sid not in before.students and sid not in added:
             s = with_new.students[sid]
-            mk("student_added", {"student": sid, "name": s.name, "teacher": s.teacher, "grade": s.grade},
+            grade = s.grade or grades.get(s.teacher, "")          # the teacher's grade when the sheet doesn't say
+            mk("student_added", {"student": sid, "name": s.name, "teacher": s.teacher, "grade": grade},
                [src_of(r) for r in (item.sources or [rec])], "new this month")
             added.add(sid)
         if item.set_teacher and sid in before.students:
             mk("teacher_set", {"student": sid, "teacher": item.set_teacher}, [src_of(rec)],
                f"sheet says {rec.teacher!r}")
+            new_grade = grades.get(item.set_teacher, "")           # a class change brings the class's grade
+            if new_grade and new_grade != before.students[sid].grade:
+                mk("grade_set", {"student": sid, "grade": new_grade}, [src_of(rec)],
+                   f"moved to {item.set_teacher}'s class (grade {new_grade})")
         if item.remember_name and sid in before.students:
             known = {mt_norm(before.students[sid].name)} | {mt_norm(n) for n in before.students[sid].nickname_list}
             if rec.name.strip() and mt_norm(rec.name) not in known:

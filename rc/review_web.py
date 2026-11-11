@@ -49,8 +49,12 @@ class ReviewApp:
         cp, source = m.previous()
         plan = m.plan()
         decisions = m.decisions()
-        suggestions = rv.suggest(plan, cp, decisions)
-        teachers = sorted({s.teacher for s in cp.students.values() if s.teacher})
+        grades = m.teacher_grades()
+        recent: dict = {}                       # each student's last months, for the review row
+        for h in cp.history:
+            recent.setdefault(h.student_id, []).append([ck.month_label(h.month), h.pages])
+        suggestions = rv.suggest(plan, cp, decisions, grades)
+        teachers = sorted({s.teacher for s in cp.students.values() if s.teacher} | set(grades))
         open_keys = {i.key for i in plan.issues}
         sheets = []
         for item in plan.settled:
@@ -85,9 +89,10 @@ class ReviewApp:
             "ready": plan.ready and any(s["status"] in (STATUS_AUTO, STATUS_DECIDED) for s in sheets),
             "counts": counts, "acceptable": sum(1 for s in sheets if s["status"] == STATUS_OPEN and s["can_accept"]
                                                 and not s["needs_choice"]),
-            "sheets": sheets, "teachers": teachers,
+            "sheets": sheets, "teachers": teachers, "teacher_grades": grades,
             "roster": [{"id": s.id, "name": s.name, "teacher": s.teacher, "grade": s.grade,
-                        "nicknames": s.nicknames, "total": s.total, "new_from": self._new_from(s.id, plan)}
+                        "nicknames": s.nicknames, "total": s.total, "new_from": self._new_from(s.id, plan),
+                        "recent": recent.get(s.id, [])[-3:][::-1]}
                        for s in sorted(list(cp.students.values()) + list(plan.pending.values()),
                                        key=lambda s: s.name.lower())
                        if s.status == ck.ACTIVE],
@@ -151,7 +156,7 @@ class ReviewApp:
             for _ in range(3):
                 cp, _ = self.month.previous()
                 decisions = self.month.decisions()
-                sug = rv.suggest(self.month.plan(), cp, decisions)
+                sug = rv.suggest(self.month.plan(), cp, decisions, self.month.teacher_grades())
                 new = {k: v.decision for k, v in sug.items()
                        if v.decision and not v.needs_choice and decisions.get(k) != v.decision}
                 if not new:
@@ -208,8 +213,8 @@ class ReviewApp:
             if key in self._images:
                 return self._images[key]
             rec = next((r for r in self.month.records() if r.key == key), None)
-            if rec is None:
-                raise KeyError(key)
+            if rec is None or rec.is_form or not (self.month.folder.scans / rec.file).exists():
+                raise KeyError(key)                   # unknown, typed in a form, or the scan was let go
             path = self.month.folder.scans / rec.file
             if path.suffix.lower() == ".pdf":
                 pix = pymupdf.open(path)[rec.page - 1].get_pixmap(dpi=IMAGE_DPI, colorspace=pymupdf.csRGB)
@@ -294,6 +299,8 @@ def make_server(app: ReviewApp | None = None, port: int = 0, home=None) -> tuple
                     return self._json(200, home.state())
                 if url.path == "/api/home/students" and home is not None:
                     return self._json(200, home.students())
+                if url.path == "/api/home/teachers" and home is not None:
+                    return self._json(200, home.teachers())
                 if url.path == "/api/home/student" and home is not None:
                     return self._json(200, home.student(query["id"][0]))
                 if url.path == "/api/state":
@@ -362,6 +369,9 @@ def make_server(app: ReviewApp | None = None, port: int = 0, home=None) -> tuple
                 return home.let_go([str(x) for x in body.get("months", [])])
             if action == "keep_raw":
                 return home.set_keep_raw(int(body.get("months", 0)))
+            if action == "teacher_grade":
+                return home.set_teacher_grade(str(body.get("teacher", "")), str(body.get("grade", "")),
+                                              bool(body.get("align")), str(body.get("reason", "")))
             if action == "adjust":
                 return home.adjust(str(body.get("student", "")), dict(body.get("change") or {}))
             if action == "finder":
