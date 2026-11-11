@@ -26,7 +26,7 @@ from rc import runner
 from rc import settings
 from rc import workspace as wsp
 
-SCAN_EXTS = wsp.SCAN_EXTS | wsp.PHOTO_EXTS
+SCAN_EXTS = wsp.SCAN_EXTS | wsp.PHOTO_EXTS | wsp.FORM_EXTS
 MAX_UPLOAD = 500 * 1024 * 1024          # a month's scan is ~50 MB
 MONTH_DIR = re.compile(r"\d{4}-\d{2}")
 
@@ -118,15 +118,24 @@ class Home:
         scans = [{"name": p.name, "pages": self._page_count(p), "mb": round(p.stat().st_size / 1e6, 1)}
                  for p in f.scan_files()]
         pages = sum(s["pages"] for s in scans)
+        from rc import forms as forms_mod
+        forms = []
+        for p in (f.form_files() if f.scans.is_dir() else []):
+            try:
+                rows, _ = forms_mod.records(p, key)
+                forms.append({"name": p.name, "rows": len(rows)})
+            except ck.CheckpointError as e:
+                forms.append({"name": p.name, "rows": 0, "problem": str(e)})
         raw = f.work / "raw"
         read = sum(1 for p in raw.glob("*.json")) if raw.is_dir() else 0
         out = {"key": key, "label": ck.month_label(key), "folder": str(f.path), "scans": scans, "pages": pages,
-               "read": min(read, pages), "records": m.records_path.exists(), "finished": f.is_finished(),
+               "read": min(read, pages), "records": m.records_path.exists() or bool(forms),
+               "finished": f.is_finished(), "forms": forms,
                "open": None, "sheets": None, "problem": "", "starts_from": "",
                "still_in_icloud": len(wsp.cloud_placeholders(f.path)),
                "estimate": round(max(pages - read, 0) * extract.COST_PER_PAGE, 2)}
         try:
-            _, out["starts_from"] = m.ws.previous_checkpoint(key) if not out["finished"] else (None, "")
+            _, out["starts_from"] = m.previous() if not out["finished"] else (None, "")
         except ck.CheckpointError as e:
             out["problem"] = str(e)
         if out["records"] and not out["finished"] and not out["problem"]:
@@ -135,8 +144,8 @@ class Home:
                 out["open"], out["sheets"] = len({i.key for i in p.issues}), len(p.settled)
             except ck.CheckpointError as e:
                 out["problem"] = str(e)
-        out["step"] = ("finished" if out["finished"] else "scans" if not scans else
-                       "read" if not out["records"] or out["read"] < pages else
+        out["step"] = ("finished" if out["finished"] else "scans" if not scans and not forms else
+                       "read" if scans and (not m.records_path.exists() or out["read"] < pages) else
                        "review" if out["open"] else "finish")
         return out
 
@@ -188,7 +197,7 @@ class Home:
         """Save an uploaded scan into the month's scans folder (written whole, then renamed into place)."""
         name = Path(name or "").name.strip()
         if not name or name.startswith(".") or Path(name).suffix.lower() not in SCAN_EXTS:
-            raise ck.CheckpointError("scans must be PDF or picture files (.pdf, .jpg, .png, .tif, .webp, .heic)")
+            raise ck.CheckpointError("add PDFs, pictures (.jpg .png .tif .webp .heic) or form responses (.csv)")
         if length <= 0 or length > MAX_UPLOAD:
             raise ck.CheckpointError("that file is empty or too big")
         f = self.month(month).folder.create()
@@ -207,6 +216,9 @@ class Home:
                         raise ck.CheckpointError("the upload was cut short; try again")
                     out.write(chunk)
                     left -= len(chunk)
+            if target.suffix.lower() in wsp.FORM_EXTS:
+                from rc import forms as forms_mod
+                forms_mod.records(tmp, f.month)            # refuses a CSV without name and pages columns
             if target.suffix.lower() == ".pdf":
                 try:
                     with pymupdf.open(tmp) as doc:

@@ -188,7 +188,7 @@ function render() {
   for (const s of visible()) {
     body.append(s.key === selected ? openRow(s) : closedRow(s));
     if (s.key === selected) body.append(controlBar(s));
-    if (s.key === selected && showSheet) body.append(el("tr", { class: "sheet" }, el("td", { colspan: 7 },
+    if (s.key === selected && showSheet && !s.read.form) body.append(el("tr", { class: "sheet" }, el("td", { colspan: 7 },
       el("img", { src: "/scan?key=" + encodeURIComponent(s.key) + "&" + AUTH, alt: "Scanned sheet " + s.label }))));
   }
   $("app").replaceChildren(el("table", {},
@@ -200,7 +200,7 @@ function closedRow(s) {
   const r = s.read;
   return el("tr", { class: "row", onclick: () => open(s.key) },
     el("td", {}, el("span", { class: "st " + s.status }, label[s.status])),
-    el("td", { class: "muted" }, s.page),
+    el("td", { class: "muted", title: s.read.form ? "row in " + s.file : s.file }, s.read.form ? "form " + s.page : s.page),
     el("td", {}, r.name || "(no name)", r.confidence !== "high" ? el("span", { class: "unsure" }, " ?") : ""),
     el("td", {}, studentCell(s)),
     el("td", {}, s.status === "skipped" ? "" : (s.form.teacher || el("span", { class: "why" }, "choose"))),
@@ -231,7 +231,7 @@ function controlBar(s) {
        btn("KeyS", "Skip sheet"), decided ? btn("KeyR", "Reset to suggestion") : null];
   return el("tr", { class: "bar-row" }, el("td", { colspan: 7 }, el("div", { class: "ctl" },
     ...left, el("span", { style: "flex:1" }), el("span", { class: "hint" }, s.label),
-    btn("KeyW", showSheet ? "▾ Hide whole sheet" : "▸ Whole sheet"))));
+    s.read.form ? el("span", { class: "hint" }, "typed in the Google Form: no scan") : btn("KeyW", showSheet ? "▾ Hide whole sheet" : "▸ Whole sheet"))));
 }
 
 // "Reading Challenge Sheets October 2026.pdf p. 3" -> "p. 3" (only one scan file per month, usually)
@@ -273,7 +273,7 @@ function openRow(s) {
     ...s.warnings.map((w) => el("div", { class: "box info" }, w)), snip(s, "month")));
   if (s.status === "skipped") {
     checkCell.firstChild.append(el("div", { class: "box info" }, s.outcome));
-    return el("tr", { class: "row sel", onclick: () => open(s.key) }, statusCell, el("td", { class: "muted" }, s.page), nameCell,
+    return el("tr", { class: "row sel", onclick: () => open(s.key) }, statusCell, el("td", { class: "muted", title: s.read.form ? "row in " + s.file : s.file }, s.read.form ? "form " + s.page : s.page), nameCell,
       el("td"), el("td"), el("td"), checkCell);
   }
   // student
@@ -325,7 +325,7 @@ function openRow(s) {
       onchange: () => s.duplicate && render() }),
     snip(s, "total"), s.duplicate ? dupChoice(s, f) : null);
   const editable = (child) => el("td", { onclick: stop }, child);
-  return el("tr", { class: "row sel", onclick: () => open(s.key) }, statusCell, el("td", { class: "muted" }, s.page), nameCell,
+  return el("tr", { class: "row sel", onclick: () => open(s.key) }, statusCell, el("td", { class: "muted", title: s.read.form ? "row in " + s.file : s.file }, s.read.form ? "form " + s.page : s.page), nameCell,
     editable(studentStack), editable(teacherStack), el("td", { class: "num", onclick: stop }, pagesStack), editable(checkCell.firstChild));
 }
 

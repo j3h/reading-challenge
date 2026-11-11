@@ -51,6 +51,12 @@ class SheetRecord:
     pages_confidence: str = HIGH
     note: str = ""             # anything extraction wants a person to see ("two totals: 158 vs 2300")
     boxes: dict = field(default_factory=dict)   # where each value was read: {"name": [x0, y0, x1, y1]} on 0-1000
+    grade: str = ""            # when the source says (a form's "Grade and Teacher")
+    submitted: str = ""        # a form row's timestamp
+
+    @property
+    def is_form(self) -> bool:
+        return self.file.lower().endswith(".csv")
 
     @property
     def key(self) -> str:
@@ -422,7 +428,7 @@ def suggest(p: Plan, cp: ck.Checkpoint, decisions: dict) -> dict[str, Suggestion
                 why = f"added as new from {p.pending[best.student.id].notes.split('from ')[-1]}; {best.reason}"
             reasons.append(why + (f"; could also be {others[0].student.name}" if others else ""))
         else:
-            d["new_student"] = {"name": rec.name, "teacher": guess, "grade": ""}
+            d["new_student"] = {"name": rec.name, "teacher": guess, "grade": rec.grade}
             reasons.append("not on the roster: add as a new student")
             if not guess:
                 complete = False

@@ -137,12 +137,14 @@ function monthCard(m, open) {
   const cls = (i) => (at > i ? "done" : at === i ? "now" : "");
   const review = () => location.href = "/review?m=" + encodeURIComponent(m.key);
 
-  const fileInput = el("input", { type: "file", accept: ".pdf,.jpg,.jpeg,.png,.tif,.tiff,.webp,.heic,.heif", multiple: true, hidden: true,
+  const fileInput = el("input", { type: "file", accept: ".pdf,.jpg,.jpeg,.png,.tif,.tiff,.webp,.heic,.heif,.csv", multiple: true, hidden: true,
     onchange: (e) => upload(m.key, [...e.target.files]) });
-  const scansWhat = m.scans.length ? `${m.scans.length} file${m.scans.length > 1 ? "s" : ""}, ${fmt(m.pages)} pages` : "No scans yet";
+  const formRows = (m.forms || []).reduce((n, f) => n + f.rows, 0);
+  const scansWhat = (m.scans.length ? `${m.scans.length} file${m.scans.length > 1 ? "s" : ""}, ${fmt(m.pages)} pages` : "No scans yet")
+    + ((m.forms || []).length ? ` · ${formRows} form response${formRows === 1 ? "" : "s"} for this month` : "");
   const steps = el("div", { class: "steps" },
     step("1 · Scans", cls(0), uploading === m.key ? "Adding…" : scansWhat, fileInput,
-      m.finished ? null : el("button", { class: at === 0 ? "primary" : "", onclick: () => fileInput.click() }, "Add scans or photos…"),
+      m.finished ? null : el("button", { class: at === 0 ? "primary" : "", onclick: () => fileInput.click() }, "Add scans, photos or form CSV…"),
       el("button", { onclick: () => act("/api/home/finder", { month: m.key, what: "scans" }) }, "Show in Finder")),
     step("2 · Read", cls(1),
       reading ? el("div", {}, `${job.done} of ${job.total} pages`, el("div", { class: "bar" }, el("div", { style: `width:${job.total ? 100 * job.done / job.total : 0}%` })))

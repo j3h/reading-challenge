@@ -37,6 +37,7 @@ CERTIFICATES = "certificates.pdf"
 SUMMARY = "summary.txt"
 SCAN_EXTS = {".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 PHOTO_EXTS = {".webp", ".heic", ".heif"}        # emailed or phone photos: converted to JPEG on the way in
+FORM_EXTS = {".csv"}                             # Google Form responses, downloaded as CSV (rc/forms.py)
 
 
 def season_for(month: str, start_month: int = SEASON_START_MONTH) -> str:
@@ -86,6 +87,9 @@ class MonthFolder:
 
     def scan_files(self) -> list[Path]:
         return sorted(p for p in self.scans.glob("*") if p.suffix.lower() in SCAN_EXTS and not p.name.startswith("."))
+
+    def form_files(self) -> list[Path]:
+        return sorted(p for p in self.scans.glob("*") if p.suffix.lower() in FORM_EXTS and not p.name.startswith("."))
 
     def convert_photos(self) -> list[str]:
         """Turn .webp/.heic photos in scans/ into JPEGs the rest of the program can read (macOS `sips`).

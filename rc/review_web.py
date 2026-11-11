@@ -68,7 +68,7 @@ class ReviewApp:
                 "key": r.key, "label": r.label, "file": r.file, "page": r.page,
                 "read": {"name": r.name, "teacher": r.teacher, "month": r.month, "pages": r.pages,
                          "confidence": r.confidence, "pages_confidence": r.pages_confidence, "note": r.note,
-                         "boxes": sorted(r.boxes)},
+                         "boxes": sorted(r.boxes), "form": r.is_form, "submitted": r.submitted, "grade": r.grade},
                 "status": status, "decision": d, "outcome": self._outcome(item, cp, plan),
                 "warnings": item.warnings,
                 "reasons": sug.reasons if sug else [],

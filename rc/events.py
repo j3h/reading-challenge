@@ -269,8 +269,10 @@ def _time(e: Event) -> dt.datetime:
     return dt.datetime.fromisoformat(e.time)
 
 
-def sheet_source(file: str, page: int) -> dict:
-    """Where a reviewed sheet came from: a page of a scanned PDF, or a photo."""
+def sheet_source(file: str, page: int, submitted: str = "") -> dict:
+    """Where a reviewed sheet came from: a page of a scanned PDF, a photo, or a row of form responses."""
+    if file.lower().endswith(".csv"):
+        return {"form": file, "row": page, "submitted": submitted}
     return {"scan": file, "page": page} if file.lower().endswith(".pdf") else {"photo": file}
 
 
@@ -282,7 +284,7 @@ def _source_text(e: Event) -> str:
         elif "photo" in s:
             parts.append(f"photo {s['photo']}")
         elif "form" in s:
-            parts.append(f"form {s.get('submitted', '')}".strip())
+            parts.append(f"form {s['form']} row {s.get('row', '?')}" + (f" ({s['submitted']})" if s.get("submitted") else ""))
         elif "workbook" in s:
             parts.append(f"{s.get('tab', s['workbook'])}" + (f" row {s['row']}" if s.get("row") else ""))
         elif s.get("manual"):

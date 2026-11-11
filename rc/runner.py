@@ -55,10 +55,17 @@ class Month:
         return cp, f"the event log ({len(state.events)} events, as of now)"
 
     def records(self) -> list[rv.SheetRecord]:
-        if not self.records_path.exists():
+        """Every sheet for the month: scanned pages and photos as read (records.json), then this month's rows of
+        any form-response CSVs in the scans folder (read fresh each time: typed, so nothing to pay for)."""
+        from rc import forms
+        forms_files = self.folder.form_files() if self.folder.scans.is_dir() else []
+        if not self.records_path.exists() and not forms_files:
             raise ck.CheckpointError(f"no sheets have been read yet: {self.records_path} is missing "
                                      f"(scans go in {self.folder.scans})")
-        return rv.load_records(self.records_path)
+        out = rv.load_records(self.records_path) if self.records_path.exists() else []
+        for f in forms_files:
+            out += forms.records(f, self.folder.month)[0]
+        return out
 
     def decisions(self) -> dict:
         return rv.load_decisions(self.decisions_path)
@@ -171,7 +178,7 @@ def month_events(p: rv.Plan, before: ck.Checkpoint, with_new: ck.Checkpoint, res
     out.append(ev.Event(finish.kind, finish.data, who, "", (), finish.time, "", finish.id, batch))
     mk = lambda kind, data, src, reason="": out.append(ev.Event(kind, data, who, reason, tuple(src),
                                                                 tick(), "", batch=batch))
-    src_of = lambda rec: ev.sheet_source(rec.file, rec.page)
+    src_of = lambda rec: ev.sheet_source(rec.file, rec.page, rec.submitted)
     added = set()
     for item in p.settled:
         rec = item.record
