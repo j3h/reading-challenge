@@ -76,6 +76,8 @@ except extraction (OCR), the review UI and the one-command runner.
   not a header). `--keep-ids` reuses IDs so review decisions stay valid. Every disagreement is noted per student.
 - `rc/import_master.py` one-time: master spreadsheet printed to PDF -> first checkpoint (name, teacher, grade,
   previous total). The prize "x" columns are deliberately ignored; red rows (no recent sheets) are only noted. `--teacher-alias OLD=NEW` merges classes.
+- Data folder top level: `events/`, one folder per school year, and `Imported - evidence only, do not edit/` holding
+  the workbook the opening events point at (`master.xlsx`, never updated, name kept so sources still match).
 - `rc/workspace.py`   data folder (outside git, e.g. iCloud Drive): `<school year>/<month>/{scans,work,
   checkpoint.xlsx,certificates.pdf,summary.txt}`. **Totals never reset**: a month starts from the latest finished
   month in any school-year folder (year folders only keep things tidy), else the latest `<year>/start/` checkpoint.
