@@ -202,10 +202,17 @@ def render_print_pdf(results, month, out_path, table=None, owed_rows=()) -> list
 
 
 # ---------------------------------------------------------------------------- printing 2 per sheet, for a paper cutter
-# Letter portrait, two certificates per sheet (top and bottom half). Each class is its own run of sheets, laid out
-# "cut and stack": with S sheets, sheet i carries certificate i on top and S+i underneath, so one cut through the
-# class's stack and the bottom pile placed under the top pile gives the class in list order. A small label in the
-# side margin ("Barry · 7 of 12"), which is trimmed off with the edges, puts a dropped pile back together.
+# Letter portrait, two certificates per sheet (top and bottom half), every sheet full. All the certificates are one
+# run in class-list order (class after class, names in order), laid out "cut and stack": with S sheets, sheet i
+# carries certificate i on top and S+i underneath, so cutting the stack across the middle (all at once, or a batch at
+# a time from the top) and putting the bottom pile under the top pile gives them in list order. A small label in the
+# side margin ("12 of 40 · Barry 3 of 6"), trimmed off with the edges, puts a dropped pile back together.
+CUTTING = [
+    "Cutting: take these list pages off first. Cut the certificate stack across the middle (the little marks at the edges).",
+    "Too thick for the cutter? Cut a few sheets at a time from the top: top halves onto one pile, bottom halves onto another,",
+    "each batch under the one before. Then put the bottom pile under the top pile: the certificates are now in the order of",
+    "these lists, class after class (the grey number in the margin, e.g. 12 of 40, is each one's place).",
+]
 SHEET_W, SHEET_H = 612, 792
 HALF_H = SHEET_H / 2
 CERT_H = HALF_H - 36                      # 1/4 inch clear above and below each certificate (printers can't print to the edge)
@@ -237,7 +244,7 @@ def _save(doc, toc, out_path):
 
 def render_print_file(results, month, out_path, table=None, owed_rows=(), reprints=None) -> list[str]:
     """The one file to print: the class lists for bagging first (pull those pages off before cutting), then the
-    certificates two to a sheet, each class on its own sheets, cut and stack. Returns warnings.
+    certificates two to a sheet, every sheet full, cut and stack in class-list order. Returns warnings.
 
     `reprints`: {student id: (the month's pages so far, every level reached this month)} for a child whose certificate
     for this month was printed in an earlier round: theirs is printed again with the whole month (it replaces the
@@ -256,9 +263,10 @@ def _certificates_doc(results, month, table, warnings, reprints=None):
     table = table or mc.load_levels()
     label = ck.month_label(ck.month_key(month))
     singles = pymupdf.open()                       # each certificate on its own page first, exactly as designed
-    runs = []
+    meta = []                                      # (teacher, place in class, class size, printed again?)
     for teacher, rs in ck.classrooms(results):
-        runs.append((teacher, singles.page_count, [r.student.id in reprints for r in rs]))
+        for k, r in enumerate(rs, 1):
+            meta.append((teacher, k, len(rs), r.student.id in reprints))
         for r in rs:
             pages, levels = reprints.get(r.student.id, (r.pages, r.prizes))
             row = {"name": r.student.name, "pages": str(pages), "total_pages": str(r.student.total),
@@ -267,21 +275,28 @@ def _certificates_doc(results, month, table, warnings, reprints=None):
     singles.subset_fonts()
     singles = pymupdf.open("pdf", singles.tobytes())   # placing pages needs a finished document
     out = pymupdf.open()
-    toc = []
-    for teacher, first, again in runs:
-        n = len(again)
-        toc.append([1, f"{teacher} ({n})", out.page_count + 1])
-        for top, bottom in cut_and_stack(n):
-            sheet = out.new_page(width=SHEET_W, height=SHEET_H)
-            for half, idx in ((0, top), (1, bottom)):
-                if idx is None:
-                    continue
-                y0 = half * HALF_H + (HALF_H - CERT_H) / 2
-                sheet.show_pdf_page(pymupdf.Rect(CERT_X, y0, CERT_X + CERT_W, y0 + CERT_H), singles, first + idx)
-                tag = f"{teacher}  ·  {idx + 1} of {n}  ·  {label}" + ("  ·  REPLACES EARLIER" if again[idx] else "")
-                sheet.insert_text((CERT_X / 2 + 3, y0 + CERT_H / 2 + 60), tag, fontsize=7, color=GREY, rotate=90)
-            for x0, x1 in ((18, 42), (SHEET_W - 42, SHEET_W - 18)):     # where to cut
-                sheet.draw_line((x0, HALF_H), (x1, HALF_H), color=GREY, width=0.5)
+    n = len(meta)
+    plan = cut_and_stack(n)
+    sheet_of = {idx: i for i, pair in enumerate(plan) for idx in pair if idx is not None}
+    toc, seen = [], set()
+    for idx, (teacher, k, size, _) in enumerate(meta):         # each class: the sheet its first certificate is on
+        if teacher not in seen:
+            seen.add(teacher)
+            toc.append([1, f"{teacher} ({size})", sheet_of[idx] + 1])
+    for top, bottom in plan:
+        sheet = out.new_page(width=SHEET_W, height=SHEET_H)
+        for half, idx in ((0, top), (1, bottom)):
+            if idx is None:
+                continue
+            teacher, k, size, again = meta[idx]
+            y0 = half * HALF_H + (HALF_H - CERT_H) / 2
+            sheet.show_pdf_page(pymupdf.Rect(CERT_X, y0, CERT_X + CERT_W, y0 + CERT_H), singles, idx)
+            tag = (f"{idx + 1} of {n}  ·  {teacher} {k} of {size}  ·  {label}" +
+                   ("  ·  REPLACES EARLIER" if again else ""))
+            sheet.insert_text((CERT_X / 2 + 3, y0 + CERT_H / 2 + 75), tag, fontsize=7, color=GREY, rotate=90)
+        for x0, x1 in ((18, 42), (SHEET_W - 42, SHEET_W - 18)):     # where to cut
+            sheet.draw_line((x0, HALF_H), (x1, HALF_H), color=GREY, width=0.5)
+    toc.sort(key=lambda e: e[2])
     return out, toc
 
 
@@ -345,6 +360,10 @@ def _class_lists_doc(results, month, owed_rows, warnings, reprints=None):
     for line in lines:
         _text(t, LIST_MARGIN, y, line, 9)
         y += 11.5
+    y += 3
+    for line in CUTTING:
+        _text(t, LIST_MARGIN, y, line, 7.5, color=GREY)
+        y += 9.5
     state["page"].draw_line((LIST_MARGIN, y), (SHEET_W - LIST_MARGIN, y), color=RULE, width=0.8)
     state.update(y=y + 16, top=y + 16)
 

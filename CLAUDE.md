@@ -70,8 +70,9 @@ except extraction (OCR), the review UI and the one-command runner.
   carried over, so a reported mistake is fixed by hand (edit the total, hand over the prize). A month is applied once and only after the previous one. Every student needs a teacher.
 - `rc/render.py`      one print file, `certificates.pdf` (`render_print_file`): the class lists first (all classes'
   bagging lists in two columns on as few pages as possible, school-wide prize count, owed prizes marked), then the
-  certificates 2 per letter sheet, cut-and-stack per class (`cut_and_stack`: one cut, bottom pile under top = list
-  order), margin label "Teacher · k of n" in the trim area. Certificates drawn by `make_certificates.draw_certificate`,
+  certificates 2 per letter sheet, every sheet full: one cut-and-stack run over all certificates in class-list order
+  (`cut_and_stack`: cut (in batches if needed), bottom pile under top = list order), margin label "k of N · Teacher j of
+  m" in the trim area; cutting steps printed under the prize tally (`render.CUTTING`), diagram in docs/cutting.svg. Certificates drawn by `make_certificates.draw_certificate`,
   unchanged. `reprint --month M` redraws it from the log.
 - `rc/import_workbook.py` preferred one-time import: the master WORKBOOK (.xlsx). Totals = end of `--through`
   month from the month tabs (PRIMARY's running total can already include the next month, or miss one); chained rows

@@ -388,6 +388,9 @@ def device_name() -> str:
     return re.sub(r"[^A-Za-z0-9_-]+", "-", name).strip("-") or "this-mac"
 
 
+_STATES: dict = {}            # events folder -> (file stamps, State)
+
+
 class EventLog:
     """The events in a data folder. `append` validates against a fresh replay before writing anything."""
 
@@ -436,7 +439,25 @@ class EventLog:
         return events
 
     def state(self) -> State:
-        return replay(self.read())
+        """The replay, kept until any event file changes (the home screen asks many times per page). Nothing changes a
+        State after replay, so sharing it is safe."""
+        key = self._stamp()
+        hit = _STATES.get(self.dir)
+        if hit and hit[0] == key:
+            return hit[1]
+        st = replay(self.read())
+        _STATES[self.dir] = (key, st)
+        return st
+
+    def _stamp(self) -> tuple:
+        out = []
+        for p in self.files():
+            try:
+                s = p.stat()
+                out.append((p.name, s.st_mtime_ns, s.st_size))
+            except OSError:
+                out.append((p.name, 0, 0))
+        return tuple(out)
 
     def append(self, new: list[Event]) -> State:
         """Validate `new` against everything already recorded, then write them to this Mac's file."""
@@ -474,7 +495,7 @@ class EventLog:
         return len(drop)
 
     def has_students(self) -> bool:
-        return any(e.kind == "student_added" for e in self.read())
+        return any(e.kind == "student_added" for e in self.state().events)
 
     def live_finish(self, month: str, state: "State | None" = None) -> "Event | None":
         """The month_finished event that currently counts for `month` (None if the month is open)."""

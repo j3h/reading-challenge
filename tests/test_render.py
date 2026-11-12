@@ -119,3 +119,19 @@ def test_cut_and_stack_puts_each_class_in_order_after_one_cut():
         bottom_pile = [b for _, b in sheets if b is not None]
         assert top_pile + bottom_pile == list(range(n))           # bottom pile placed under the top pile
         assert len(sheets) == (n + 1) // 2
+
+
+def test_cutting_in_batches_keeps_the_order():
+    """Too many sheets for the cutter: cut a few from the top at a time, top halves onto one pile and bottom halves
+    onto another (each batch under the one before), then the bottom pile under the top pile."""
+    for n in range(1, 60):
+        sheets = render.cut_and_stack(n)
+        for batch in range(1, 12):
+            top_pile, bottom_pile = [], []
+            for start in range(0, len(sheets), batch):
+                for top, bottom in sheets[start:start + batch]:
+                    top_pile.append(top)
+                    bottom_pile.append(bottom)
+            order = [i for i in top_pile + bottom_pile if i is not None]
+            assert order == list(range(n)), (n, batch)
+        assert all(top is not None for top, _ in sheets) and sum(b is None for _, b in sheets) == n % 2

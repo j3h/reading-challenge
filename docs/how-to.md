@@ -62,10 +62,8 @@ October becomes "October 2026 · round 1" and nothing else changes.)
      - **Page 1 is the class lists** (sometimes 2 pages): what to bag for each child, class by class, the whole
        school's prize count at the top (for pulling prizes from stock), and anything **owed** from earlier.
        Lift it off before cutting.
-     - **Then the certificates, two per sheet**, each class on its own sheets. For each class: cut the stack once
-       across the middle (the little marks at the edges show where), put the bottom pile under the top pile, and
-       it's in the same order as the class list. The small grey label in the margin ("Barry · 3 of 6") puts a
-       dropped pile back together; it comes off when you trim the edges.
+     - **Then the certificates, two per sheet**, every sheet full. See **Cutting** below: after one cut they're in
+       the order of the class lists, class after class.
    - **Summary**: the prize totals, and at the top **Checks: all passed**. If it says **FAILED**, don't
      print it yet: ask for help.
    - **Spreadsheet** (checkpoint.xlsx): everyone's totals. The **Sheets** tab has a row for every sheet in the
@@ -74,6 +72,23 @@ October becomes "October 2026 · round 1" and nothing else changes.)
    The prizes on a round's class lists count as **handed out** once it's printed. If one never reached the child,
    open their page under **Students** and press **Not handed out** next to it: it goes back on the next round's list,
    marked "(owed)".
+
+## Cutting
+
+Print the file at **100% / actual size** on letter paper, take the class list page(s) off, then:
+
+![Cutting: cut the stack across the middle, keep the top halves and bottom halves in two piles, put the bottom pile under the top pile](cutting.svg)
+
+1. **Cut the whole certificate stack across the middle** (the little marks at the left and right edges show
+   where).
+2. **Too thick for the cutter?** Cut a few sheets at a time, starting from the top of the stack. Put each batch's top
+   halves on one pile and its bottom halves on another, each batch **under** the one before, so both piles stay
+   in printed order.
+3. **Put the bottom pile under the top pile.** The certificates are now in the order of the class lists: the first
+   class's children in list order, then the next class, and so on. The classes follow each other in one stack, so
+   split it where the teacher's name in the margin changes.
+4. **Trim the edges.** The small grey label in the margin ("5 of 8 · Hunt 2 of 3": 5th of 8 overall, 2nd of 3 in
+   Hunt's class) is there to put a dropped pile back in order; it comes off with the trim.
 
 ## If a round was wrong
 

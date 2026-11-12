@@ -264,7 +264,8 @@ class Pool(Month):
         return out
 
     def unfiled(self) -> list[rv.SheetRecord]:
-        return [r for r in self.all_records() if not self.is_filed(r)]
+        st = self.log.state()
+        return [r for r in self.all_records() if not self.is_filed(r, st)]
 
     def is_filed(self, r: rv.SheetRecord, state=None) -> bool:
         """Printed already? A form answer is known by its content (rows move when answers are deleted from the
@@ -342,6 +343,7 @@ class Pool(Month):
         """How many sheets are open, ready, held, skipped (ready but not counted) and already printed."""
         full = self.plan()
         rp, back = self.round_plan()
+        st_now = self.log.state()
         open_keys = {i.key for i in full.issues}
         return {"open": len(open_keys), "waiting": len(back - open_keys),
                 "ready": sum(1 for i in rp.settled if not i.skipped or i.merged),
@@ -349,7 +351,7 @@ class Pool(Month):
                                  for i in rp.settled if not i.skipped}),
                 "skipped": sum(1 for i in rp.settled if i.skipped and not i.merged),
                 "held": len(self.held()),
-                "printed": sum(1 for r in self.all_records() if self.is_filed(r))}
+                "printed": sum(1 for r in self.all_records() if self.is_filed(r, st_now))}
 
     # ---- Inbox.txt: what is waiting, for people (the app never reads it)
     def inbox_text(self) -> str:
