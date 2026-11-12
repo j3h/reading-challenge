@@ -44,6 +44,78 @@ def _pages(text: str) -> int | None:
     return int(float(s)) if re.fullmatch(r"\d+(\.\d+)?", s) else None
 
 
+def _submitted_date(text: str):
+    """'11/3/2026 18:37:20' (Google's US format) or ISO -> date, else None."""
+    import datetime as dt
+    text = str(text or "").strip()
+    m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})", text)
+    if m:
+        try:
+            return dt.date(int(m.group(3)), int(m.group(1)), int(m.group(2)))
+        except ValueError:
+            return None
+    try:
+        return dt.date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def resolve_month(answer: str, submitted: str = "") -> str:
+    """The month a form answer means, as '2026-10', or '' if it can't tell. 'October' with no year is the latest
+    October on or before the day it was submitted (a parent can't report a month that hasn't started)."""
+    import datetime as dt
+    text = " ".join(str(answer or "").split())
+    if not text:
+        return ""
+    try:
+        return ck.month_key(text)
+    except ck.CheckpointError:
+        pass
+    word = text.lower().rstrip(".")
+    month = next((n for name, n in rv.MONTH_NAMES.items() if len(word) >= 3 and name.startswith(word)), None)
+    if month is None:
+        return ""
+    day = _submitted_date(submitted) or dt.date.today()
+    year = day.year if month <= day.month else day.year - 1
+    return f"{year}-{month:02d}"
+
+
+def pool_records(path, since: str = "") -> tuple[list[rv.SheetRecord], list[str]]:
+    """Every row of a form download for the inbox: rows for months before `since` ('2026-10') are left out (they
+    were handled before the inbox existed); rows with no month, or one that can't be read, are kept."""
+    path = Path(path)
+    with open(path, newline="", encoding="utf-8-sig") as fh:
+        rows = list(csv.reader(fh))
+    if not rows:
+        return [], [f"{path.name} is empty"]
+    header = rows[0]
+    col = {"time": _find(header, "timestamp", "time"), "name": _find(header, "name"),
+           "teacher": _find(header, "teacher", "class"), "month": _find(header, "month"),
+           "pages": _find(header, "pages", "how many")}
+    missing = [k for k in ("name", "pages") if col[k] is None]
+    if missing:
+        raise ck.CheckpointError(f"{path.name}: no column for {', '.join(missing)} (headers: {', '.join(header)})")
+    get = lambda r, k: (r[col[k]].strip() if col[k] is not None and col[k] < len(r) else "")
+    out, left_out = [], []
+    for n, r in enumerate(rows[1:], start=2):
+        if not any(c.strip() for c in r):
+            continue
+        month, submitted = get(r, "month"), get(r, "time")
+        key = resolve_month(month, submitted)
+        if since and key and key < since:
+            left_out.append(f"{path.name} row {n}: {ck.month_label(key)}, before the inbox started")
+            continue
+        grade, teacher = split_grade_teacher(get(r, "teacher"))
+        pages = _pages(get(r, "pages"))
+        out.append(rv.SheetRecord(
+            path.name, n, get(r, "name"), teacher, month, pages,
+            confidence=rv.HIGH, pages_confidence=rv.HIGH if pages is not None else rv.UNREADABLE,
+            note=f"Google Form, submitted {submitted}" + ("" if month else "; no month given") +
+                 ("" if pages is not None else f"; pages answer was {get(r, 'pages')!r}"),
+            grade=grade, submitted=submitted))
+    return out, left_out
+
+
 def records(path, batch_month: str) -> tuple[list[rv.SheetRecord], list[str]]:
     """(sheets for `batch_month`, notes about rows left out). Row numbers are as in the sheet (header = 1)."""
     path = Path(path)

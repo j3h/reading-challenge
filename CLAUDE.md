@@ -104,6 +104,25 @@ except extraction (OCR), the review UI and the one-command runner.
 - Tests use made-up children only. Run with `.venv/bin/python -m pytest -q` (Python via `uv`, see below).
 - Python: the system `python3` shim is broken on this Mac; use `uv venv .venv && uv pip install -r requirements.txt`.
 
+## Inbox and rounds (`runner.Pool`; how a data folder with an event log works now)
+- One `Inbox/` (scans/, work/{records.json, decisions.json, pool.json, raw/}) instead of month folders. A sheet is
+  open / ready / held (`{"hold": true}`) / filed. A round (`Pool.finish`) prints the ready ones for the round month
+  (`pool.json` `round_month`, default: last calendar month, never older than the latest round) into
+  `<season>/<YYYY-MM> round <n>/`; its `month_finished` event carries `round` and `keys` (sheets it used; replay ->
+  `State.filed`, `State.rounds`). `round_plan` holds back open sheets and every other sheet of their child.
+- A sheet for a child who already has pages for the round month, or for the month the sheet names, is a `repeat`
+  question (hold / skip / accept = `repeat_ok`); Hold in the UI also sets `repeat_ok`. Accepted for a month the child
+  already has pages for: `runner.reprint_map` -> the round prints their certificate again with the whole month (pages
+  and every level reached that month; margin "REPLACES EARLIER"); the class list says "reprint" and bags only the new
+  prizes (events record only this round's pages and new prizes).
+- Form CSVs: `forms.pool_records` (month answer resolved against the submit date; rows before `forms_from` ignored);
+  re-uploading the same name replaces the download only if every old row is unchanged. Keys are `file#row`.
+- `Pool.undo_round` (latest only) voids its batch and renames the folder "(undone …)". `move_to_inbox` / `to-inbox` /
+  the app's "Move them" card: one-time migration; a finished month's files become round 1 and a `sheets_filed` event
+  in its finish batch marks its sheets filed. Month folders (`runner.Month`) remain for folders without a log.
+- Prizes count as given when a round prints (`prizes_given`); "Not handed out" on a child's page voids that event,
+  so the prize is owed on the next round's list. Let-go of old raw scans is month-folder only (not in the inbox yet).
+
 ## Event log (`rc/events.py`)
 Every change is an append-only event with who/when/which Mac, a reason, and `sources` pointing at the evidence
 (scan page, photo, form row, workbook tab+row, or manual). State = replay in time order; checkpoint.xlsx is a

@@ -3,6 +3,15 @@
 The data folder is outside the git repo (it holds children's names), typically in iCloud Drive so
 Jamie can see it:
 
+With an event log (the usual case now) sheets are not filed by month until they are printed:
+
+    <data folder>/
+      Inbox/scans, Inbox/work         every sheet waiting (or already printed: kept for its scan image)
+      2026-27/2026-10 round 1/        what one round printed: certificates.pdf, summary.txt, checkpoint.xlsx
+      2026-27/2026-10 round 2/        a later round for the same month (late sheets)
+
+Older data folders (and tests) use one folder per month:
+
     <data folder>/
       2026-27/                        one folder per school year, only to keep months tidy
         start/checkpoint.xlsx         optional: the very first checkpoint (e.g. imported master sheet)
@@ -102,6 +111,56 @@ class MonthFolder:
         return convert_photos(self.scans)
 
 
+INBOX = "Inbox"
+
+
+@dataclass(frozen=True)
+class Inbox(MonthFolder):
+    """Where every sheet waits until a round prints it: scans, photos and form downloads (scans/), what was read
+    and decided (work/). One for the whole data folder; a sheet's month is chosen when a round prints it."""
+    month: str = "inbox"
+    season: str = ""
+
+    @property
+    def path(self) -> Path:
+        return self.root / INBOX
+
+    def is_finished(self) -> bool:
+        return False
+
+
+@dataclass(frozen=True)
+class RoundFolder:
+    """One round's outputs: <school year>/<YYYY-MM> round <n>/ (certificates.pdf, summary.txt, checkpoint.xlsx)."""
+    root: Path
+    month: str
+    number: int
+
+    @property
+    def path(self) -> Path:
+        return self.root / season_for(self.month) / f"{self.month} round {self.number}"
+
+    @property
+    def certificates(self) -> Path:
+        return self.path / CERTIFICATES
+
+    @property
+    def summary(self) -> Path:
+        return self.path / SUMMARY
+
+    @property
+    def checkpoint(self) -> Path:
+        return self.path / CHECKPOINT
+
+    @property
+    def class_lists(self) -> Path:
+        return self.path / CLASS_LISTS
+
+    def create(self) -> "RoundFolder":
+        self.path.mkdir(parents=True, exist_ok=True)
+        return self
+
+
 class Workspace:
     def __init__(self, root):
         self.root = Path(root).expanduser()
@@ -111,6 +170,12 @@ class Workspace:
     def month_folder(self, month: str, season: str | None = None) -> MonthFolder:
         key = ck.month_key(month)
         return MonthFolder(self.root, key, season or season_for(key))
+
+    def inbox(self) -> Inbox:
+        return Inbox(self.root)
+
+    def round_folder(self, month: str, number: int) -> RoundFolder:
+        return RoundFolder(self.root, ck.month_key(month), number)
 
     def seasons(self) -> list[str]:
         return sorted(p.name for p in self.root.iterdir()

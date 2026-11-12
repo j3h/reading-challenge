@@ -19,6 +19,8 @@ Decisions, keyed by sheet ("<file>#<page>"):
     {"pages_ok": true}                            the read page count is right (for low confidence)
     {"teacher": "Moren"}                          (with an existing student) their teacher now: fills a missing
                                                   teacher or records a class change
+    {"repeat_ok": true}                           (inbox) count it although the child already has pages for that month
+    {"hold": true}                                (inbox) keep it for a later round
     {"duplicate": "sum" | "replace" | "skip"}     another sheet for a child already seen this month (page order):
                                                   add its pages, use its pages instead, or ignore it
 
@@ -412,6 +414,11 @@ def suggest(p: Plan, cp: ck.Checkpoint, decisions: dict, teacher_grades: dict | 
         if item.skipped or not issues:
             continue
         d = dict(decisions.get(rec.key, {}))
+        kinds = {i.kind for i in issues}
+        if kinds == {"repeat"}:          # settled but for a repeat of a month already counted: a person chooses
+            d.update(student=item.student_id, pages=item.pages, repeat_ok=True)
+            out[rec.key] = Suggestion(d, [i.message.split(": ", 1)[-1] for i in issues], d, needs_choice=True)
+            continue
         reasons, complete = [], True
         m = p.matches.get(rec.key)
         guess = teacher_guess(rec.teacher, teachers)

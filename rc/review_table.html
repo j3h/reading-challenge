@@ -57,7 +57,7 @@
   .st { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12px; }
   .st::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--c); }
   .st.open { --c: var(--open); color: var(--open); font-weight: 600; } .st.auto { --c: var(--auto); }
-  .st.decided { --c: var(--decided); } .st.skipped { --c: var(--skip); color: var(--muted); }
+  .st.decided { --c: var(--decided); } .st.skipped, .st.held { --c: var(--skip); color: var(--muted); }
   .muted { color: var(--muted); }
   .unsure { color: var(--open); font-weight: 600; }
   .why { font-size: 12px; color: var(--open); }
@@ -101,7 +101,7 @@
 </head>
 <body>
 <header>
-  <a id="home" class="home" href="/" hidden>← All months</a>
+  <a id="home" class="home" href="/" hidden>← Home</a>
   <span class="badge">BCS PTA</span>
   <h1 id="title">Reading Challenge review</h1>
   <div class="counts" id="counts"></div>
@@ -110,7 +110,7 @@
 </header>
 <div class="bar">
   <label><input type="checkbox" id="onlyOpen"> only rows that need a look</label>
-  <span><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> accept row &amp; go to next that needs a look · <kbd>A</kbd> accept · <kbd>S</kbd> skip · <kbd>R</kbd> reset · <kbd>W</kbd> whole sheet (with <kbd>Alt</kbd> while typing) · <kbd>Esc</kbd> close row</span>
+  <span><kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> accept row &amp; go to next that needs a look · <kbd>A</kbd> accept · <kbd>S</kbd> skip · <kbd>H</kbd> hold for later · <kbd>R</kbd> reset · <kbd>W</kbd> whole sheet (with <kbd>Alt</kbd> while typing) · <kbd>Esc</kbd> close row</span>
 </div>
 <div class="wrap" id="app"></div>
 <div id="error"></div>
@@ -145,7 +145,7 @@ async function api(path, body) {
 const fmt = (n) => (n == null || n === "" ? "?" : Number(n).toLocaleString());
 const sheet = () => state.sheets.find((s) => s.key === selected);
 const visible = () => state.sheets.filter((s) => !onlyOpen || s.status === "open" || s.key === selected);
-const label = { open: "needs a look", auto: "automatic", decided: "accepted", skipped: "skipped" };
+const label = { open: "needs a look", auto: "automatic", decided: "accepted", skipped: "skipped", held: "held for later" };
 const nextOpen = (fromKey) => { const list = state.sheets, n = list.length, at = list.findIndex((s) => s.key === fromKey);
   for (let i = 1; i <= n; i++) { const s = list[(at + i) % n]; if (s.status === "open") return s; } return null; };
 
@@ -171,6 +171,7 @@ async function save(decision, advance) {
 function studentCell(s) {
   const f = s.form;
   if (s.status === "skipped") return el("span", { class: "muted" }, s.outcome);
+  if (s.status === "held" && !f.mode) return el("span", { class: "muted" }, s.outcome);
   if (f.mode === "student") { const p = state.roster.find((x) => x.id === f.student);
     return p ? el("span", {}, p.name, p.new_from ? el("span", { class: "muted" }, ` (new, ${p.new_from})`) : "") : "?"; }
   if (f.mode === "new") return el("span", {}, f.new.name || "?", el("span", { class: "muted" }, " (new)"));
@@ -180,10 +181,12 @@ function studentCell(s) {
 function render() {
   if (state.finished) return renderFinished();
   const c = state.counts;
-  $("title").textContent = "Review: " + state.month;
-  $("counts").textContent = `${state.sheets.length} sheets · ${c.open} need a look · ${c.auto} automatic · ${c.decided} accepted · ${c.skipped} skipped`;
+  $("title").textContent = state.pool ? `Inbox · next round: ${state.round_label}` : "Review: " + state.month;
+  $("counts").textContent = `${state.sheets.length} sheets · ${c.open} need a look · ${c.auto} automatic · ${c.decided} accepted · ${c.skipped} skipped`
+    + (state.pool ? ` · ${c.held} held` : "");
   $("acceptAll").textContent = `Accept all suggestions (${state.acceptable})`; $("acceptAll").disabled = !state.acceptable;
   $("finish").disabled = !state.ready;
+  if (state.pool) $("finish").textContent = `Print round (${state.round.children} certificate${state.round.children === 1 ? "" : "s"})`;
   const body = el("tbody");
   for (const s of visible()) {
     body.append(s.key === selected ? openRow(s) : closedRow(s));
@@ -203,7 +206,7 @@ function closedRow(s) {
     el("td", { class: "muted", title: s.read.form ? "row in " + s.file : s.file }, s.read.form ? "form " + s.page : s.page),
     el("td", {}, r.name || "(no name)", r.confidence !== "high" ? el("span", { class: "unsure" }, " ?") : ""),
     el("td", {}, studentCell(s)),
-    el("td", {}, s.status === "skipped" ? "" : (s.form.teacher || el("span", { class: "why" }, "choose"))),
+    el("td", {}, s.status === "skipped" ? "" : (s.form.teacher || (s.status === "held" ? "" : el("span", { class: "why" }, "choose")))),
     el("td", { class: "num" }, s.status === "skipped" ? "" : fmt(s.form.pages), r.pages_confidence !== "high" && s.status !== "skipped" ? el("span", { class: "unsure" }, " ?") : ""),
     el("td", {}, s.status === "open" ? el("span", { class: "why" }, shortPages(s.reasons.join(" · ")))
       : el("span", { class: "muted" }, s.duplicate && s.status !== "skipped" ? shortPages(s.outcome) : (s.warnings[0] || ""))));
@@ -216,6 +219,9 @@ const ACTIONS = {
   KeyS: () => { const s = sheet(); if (s && s.status !== "skipped") save({ skip: "skipped" }, true); },
   KeyR: () => { const s = sheet(); if (s && Object.keys(s.decision).length && confirm(s.status === "skipped" ? "Un-skip this sheet?" : "Forget what was chosen for this sheet and go back to the suggestion?")) save({}, false); },
   KeyW: () => { showSheet = !showSheet; render(); },
+  KeyH: () => { const s = sheet(); if (!s || !state.pool) return;
+    if (s.status === "held") { const d = { ...s.decision }; delete d.hold; save(d, false); }
+    else save({ ...s.decision, hold: true, ...(s.repeat ? { repeat_ok: true } : {}) }, true); },   // held = real reading, counted later
 };
 function keyed(text, letter) {           // "Skip" + "S" -> S̲kip, with the letter underlined
   const i = text.toLowerCase().indexOf(letter.toLowerCase());
@@ -225,10 +231,13 @@ function controlBar(s) {
   const btn = (code, text, attrs = {}) => el("button", { ...attrs, title: `${text} (${code.slice(3)}, or Alt+${code.slice(3)} while typing)`,
     onclick: (e) => { e.stopPropagation(); ACTIONS[code](); } }, ...keyed(text, code.slice(3)));
   const decided = Object.keys(s.decision).length > 0;
-  const left = s.status === "skipped"
+  const left = s.status === "held"
+    ? [btn("KeyH", "Bring back for this round", { class: "primary" })]
+    : s.status === "skipped"
     ? [btn("KeyR", "Restore (un-skip)", { class: "primary" })]
     : [btn("KeyA", s.status === "open" ? "Accept" : "Save", { class: "primary", id: "accept" }), el("span", { class: "hint" }, "or Enter"),
-       btn("KeyS", "Skip sheet"), decided ? btn("KeyR", "Reset to suggestion") : null];
+       btn("KeyS", "Skip sheet"), state.pool ? btn("KeyH", "Hold for a later round") : null,
+       decided ? btn("KeyR", "Reset to suggestion") : null];
   return el("tr", { class: "bar-row" }, el("td", { colspan: 7 }, el("div", { class: "ctl" },
     ...left, el("span", { style: "flex:1" }), el("span", { class: "hint" }, s.label),
     s.read.form ? el("span", { class: "hint" }, "typed in the Google Form: no scan") : btn("KeyW", showSheet ? "▾ Hide whole sheet" : "▸ Whole sheet"))));
@@ -271,7 +280,7 @@ function openRow(s) {
   const checkCell = el("td", {}, el("div", { class: "stack" },
     s.status === "open" && s.reasons.length ? el("div", { class: "box why" }, el("ul", {}, s.reasons.map((x) => el("li", {}, shortPages(x))))) : null,
     ...s.warnings.map((w) => el("div", { class: "box info" }, w)), snip(s, "month")));
-  if (s.status === "skipped") {
+  if (s.status === "skipped" || s.status === "held") {
     checkCell.firstChild.append(el("div", { class: "box info" }, s.outcome));
     return el("tr", { class: "row sel", onclick: () => open(s.key) }, statusCell, el("td", { class: "muted", title: s.read.form ? "row in " + s.file : s.file }, s.read.form ? "form " + s.page : s.page), nameCell,
       el("td"), el("td"), el("td"), checkCell);
@@ -355,6 +364,7 @@ function accept() {
     d = { new_student: { name: f.new.name.trim(), teacher: f.teacher.trim(), grade: f.new.grade.trim() }, pages: Number(f.pages) };
   }
   if (s.duplicate) d.duplicate = f.duplicate || "sum";
+  if (s.repeat) d.repeat_ok = true;              // the child already has pages for that month: counted anyway, on purpose
   if (pickedNewId(f)) delete d.teacher;
   save(d, true);
 }
@@ -397,6 +407,14 @@ $("acceptAll").addEventListener("click", async () => {
   try { state = await api("/api/accept_all", {}); form = null; selected = (state.sheets.find((s) => s.status === "open") || {}).key || null; render(); } catch (e) { fail(e.message); }
 });
 $("finish").addEventListener("click", async () => {
+  if (state.pool) {
+    const r = state.round, left = r.open + r.waiting + r.held;
+    if (!confirm(`Print ${state.round_label} round ${state.next_round}: ${r.children} certificate(s) from ${r.ready} sheet(s)?` +
+      (left ? `\n\n${left} sheet(s) still open, waiting or held stay in the inbox for a later round.` : "") +
+      "\n\nThe month can be changed on the home screen. The prizes on its class lists count as handed out.")) return;
+    try { await api("/api/finish", {}); location.href = "/"; } catch (e) { fail(e.message); }
+    return;
+  }
   if (!confirm("Finish " + state.month + "? This writes the certificates and the new checkpoint.")) return;
   try { state = await api("/api/finish", {}); render(); } catch (e) { fail(e.message); }
 });

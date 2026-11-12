@@ -30,7 +30,10 @@ Event kinds (data fields):
     pages_adjusted     student, month, delta         a correction to a month's pages; needs a reason
     prizes_given       student, month, levels        level thresholds handed out
     event_voided       event                         cancels another event; needs a reason
-    month_finished     month                         a month was finished (which Mac, when)
+    month_finished     month [, round, keys]         a month was finished, or a round printed for it: `round` is its
+                                                     number within the month, `keys` the inbox sheets it used up
+    sheets_filed       month, keys                   inbox sheets a month's finish used (written when a month folder
+                                                     moved into the inbox; same batch as that finish)
     teacher_grade_set  teacher, grade                the grade a teacher's class is (new students and class changes
                                                      take it; changeable, e.g. a teacher moving grades next year)
 
@@ -65,6 +68,7 @@ KINDS = {
     "prizes_given": ("student", "month", "levels"),
     "event_voided": ("event",),
     "month_finished": ("month",),
+    "sheets_filed": ("month", "keys"),
     "teacher_grade_set": ("teacher", "grade"),
 }
 NEEDS_REASON = {"total_set", "pages_adjusted", "event_voided"}
@@ -137,7 +141,9 @@ class Event:
             "pages_adjusted": lambda: f"{ck.month_label(d['month'])}: pages {d['delta']:+,}",
             "prizes_given": lambda: f"prizes handed out: {', '.join(f'{t:,}' for t in d['levels'])}",
             "event_voided": lambda: f"cancelled event {d['event'][:8]}",
-            "month_finished": lambda: f"{ck.month_label(d['month'])} finished",
+            "month_finished": lambda: (f"{ck.month_label(d['month'])} round {d['round']} printed" if d.get("round")
+                                       else f"{ck.month_label(d['month'])} finished"),
+            "sheets_filed": lambda: f"{len(d['keys'])} sheets filed with {ck.month_label(d['month'])}",
             "teacher_grade_set": lambda: f"{d['teacher']}'s class is grade {d['grade'] or '(none)'}",
         }[self.kind]()
         return text + (f" - {self.reason}" if self.reason else "")
@@ -169,7 +175,9 @@ class State:
     history: list = field(default_factory=list)               # ck.HistoryRow, in time order
     month_pages: dict = field(default_factory=dict)           # (id, month) -> pages (after adjustments)
     prizes_given: dict = field(default_factory=dict)          # id -> set of thresholds
-    finished: dict = field(default_factory=dict)              # month -> month_finished event
+    finished: dict = field(default_factory=dict)              # month -> its first month_finished event
+    rounds: list = field(default_factory=list)                # every live month_finished event (rounds), time order
+    filed: set = field(default_factory=set)                   # inbox sheet keys a live round has used
     teacher_grades: dict = field(default_factory=dict)        # teacher -> grade (latest teacher_grade_set)
     voided: set = field(default_factory=set)
     by_student: dict = field(default_factory=dict)            # id -> [Event] (live and voided, time order)
@@ -229,10 +237,16 @@ def replay(events) -> State:
 def _apply(st: State, e: Event, last_set: dict) -> None:
     d, sid = e.data, e.student
     if e.kind == "month_finished":
-        if d["month"] in st.finished and st.finished[d["month"]].device != e.device:
+        first = st.finished.get(d["month"])
+        if first and "round" not in d and "round" not in first.data and first.device != e.device:
             st.warnings.append(f"{ck.month_label(d['month'])} was finished on two Macs "
-                               f"({st.finished[d['month']].device}, {e.device}): check for double counting")
+                               f"({first.device}, {e.device}): check for double counting")
         st.finished.setdefault(d["month"], e)
+        st.rounds.append(e)
+        st.filed.update(d.get("keys") or ())
+        return
+    if e.kind == "sheets_filed":
+        st.filed.update(d["keys"])
         return
     if e.kind == "teacher_grade_set":
         if d["grade"].strip():

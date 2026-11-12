@@ -61,6 +61,8 @@
   .owed { color: var(--open); font-weight: 600; font-size: 13px; }
   .form-grid { display: grid; grid-template-columns: 150px 1fr; gap: 8px 12px; align-items: center; max-width: 640px; }
   .form-grid label { color: var(--muted); font-size: 13px; }
+  .file-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid var(--line); }
+  .file-row a { font-weight: 600; }
   .tl { display: flex; flex-direction: column; gap: 0; }
   .tl .ev { display: grid; grid-template-columns: 96px 1fr auto; gap: 4px 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
   .tl .ev.cancelled .what { text-decoration: line-through; color: var(--muted); }
@@ -74,7 +76,7 @@
 <header>
   <span class="badge">BCS PTA</span>
   <h1>Reading Challenge</h1>
-  <button id="monthsBtn" hidden>Months</button>
+  <button id="monthsBtn" hidden>Home</button>
   <button id="studentsBtn">Students</button>
   <button id="teachersBtn">Teachers</button>
   <button id="settingsBtn">Settings</button>
@@ -209,6 +211,78 @@ async function upload(month, files) {
   uploading = ""; render();
 }
 
+// ---------------------------------------------------------------- the inbox and rounds
+function inboxCard(ib) {
+  const job = state.job && state.job.month === "inbox" ? state.job : null;
+  const reading = job && job.running;
+  const c = ib.counts;
+  const fileInput = el("input", { type: "file", accept: ".pdf,.jpg,.jpeg,.png,.tif,.tiff,.webp,.heic,.heif,.csv", multiple: true, hidden: true,
+    onchange: (e) => upload("inbox", [...e.target.files]) });
+  const formRows = ib.forms.reduce((n, f) => n + f.rows, 0);
+  const unread = ib.pages - ib.read;
+  const review = () => location.href = "/review?m=inbox";
+  const month = el("input", { type: "month", value: ib.round_month, min: ib.latest_round_month || null,
+    onchange: (e) => e.target.value && act("/api/home/round_month", { month: e.target.value }) });
+  const line = (n, text, extra) => el("div", { class: "row" }, el("b", { style: "min-width:2.5em;text-align:right" }, fmt(n)), el("span", {}, text), extra || null);
+  const ready = c ? c.children : 0;
+  return el("div", { class: "card" },
+    el("div", { class: "row" }, el("h2", { style: "flex:1;margin:0" }, "Inbox"),
+      fileInput, el("button", { class: !ib.scans.length && !ib.forms.length ? "primary" : "", onclick: () => fileInput.click() }, uploading === "inbox" ? "Adding…" : "Add scans, photos or form CSV…"),
+      el("button", { onclick: () => act("/api/home/finder", { month: "inbox", what: "scans" }) }, "Show in Finder")),
+    el("p", { class: "muted" }, "Every sheet waits here until a round prints it. Add new scans or a fresh download of the form responses at any time.",
+      " ", `${ib.scans.length} scan file${ib.scans.length === 1 ? "" : "s"} (${fmt(ib.pages)} pages)` + (ib.forms.length ? ` · ${formRows} form answer${formRows === 1 ? "" : "s"}` : "")),
+    ib.problem ? el("p", { class: "bad" }, ib.problem) : null,
+    ib.still_in_icloud ? el("p", { class: "bad" }, `${ib.still_in_icloud} file(s) are still downloading from iCloud. Open the inbox in Finder and wait for them.`) : null,
+    job && !job.running && job.error ? el("p", { class: "bad" }, "Reading stopped: " + job.error) : null,
+    job && !job.running && job.result ? el("p", {}, job.result) : null,
+    reading ? el("div", {}, `Reading: ${job.done} of ${job.total} pages`, el("div", { class: "bar" }, el("div", { style: `width:${job.total ? 100 * job.done / job.total : 0}%` }))) : null,
+    !reading && unread > 0 ? el("div", { class: "row" }, el("span", {}, `${fmt(unread)} new page${unread === 1 ? "" : "s"} to read.`),
+      el("button", { class: "primary", disabled: !state.api_key || (state.job && state.job.running), title: state.api_key ? "" : "Add the API key in Settings first",
+        onclick: () => confirm(`Read ${unread} page(s) with Claude? It costs about ${money(ib.estimate)}.`) && act("/api/home/read", { month: "inbox" }) },
+        `Read them (about ${money(ib.estimate)})`)) : null,
+    c ? el("div", { class: "steps", style: "grid-template-columns:1fr 1fr" },
+      el("div", { class: "step " + (c.open ? "now" : "done") }, el("b", {}, "1 · Decide"),
+        line(c.open, c.open === 1 ? "sheet needs a decision" : "sheets need a decision"),
+        c.waiting ? line(c.waiting, "more wait for a child's open sheet") : null,
+        c.held ? line(c.held, "held for a later round") : null,
+        el("button", { class: c.open ? "primary" : "", onclick: review }, c.open ? "Review sheets →" : "Look at the sheets →")),
+      el("div", { class: "step " + (ready ? "now" : "") }, el("b", {}, "2 · Print a round"),
+        line(c.ready, `sheet${c.ready === 1 ? "" : "s"} ready: ${ready} certificate${ready === 1 ? "" : "s"}`),
+        el("div", { class: "row" }, el("span", {}, "Month:"), month, el("span", { class: "muted" }, `round ${ib.next_round}` + (ib.round_default ? " (last month)" : ""))),
+        el("button", { class: ready && !c.open ? "primary" : "", disabled: !ready,
+          onclick: () => confirm(`Print ${ib.round_label} round ${ib.next_round}: ${ready} certificate(s) from ${c.ready} sheet(s)?` +
+            (c.open || c.waiting || c.held ? `\n\n${c.open + c.waiting + c.held} sheet(s) still open, waiting or held stay in the inbox for a later round.` : "") +
+            "\n\nThe prizes on its class lists count as handed out.") && act("/api/home/round", {}) },
+          `Print round →`))) : el("p", { class: "muted" }, "Nothing to review yet."),
+    c && c.printed ? el("p", { class: "muted" }, `${c.printed} sheet(s) in the inbox were printed in earlier rounds (kept for their scans).`) : null);
+}
+
+function roundsCard(rounds) {
+  if (!rounds.length) return null;
+  const undo = (r) => {
+    const reason = prompt(`Undo ${r.label} round ${r.round}? Its certificates, prizes and new students are cancelled in the history (still visible), its files are moved to an "(undone)" folder, and its sheets go back to the inbox with their decisions.\n\nWhy? (kept in the history)`);
+    if (reason) act("/api/home/undo_round", { batch: r.batch, reason });
+  };
+  const what = { "certificates.pdf": "Print this", "summary.txt": "Summary", "checkpoint.xlsx": "Spreadsheet" };
+  const one = (r) => el("div", { class: "file-row" },
+    el("div", { style: "flex:1" }, el("b", {}, `${r.label} · round ${r.round}`),
+      el("div", { class: "muted" }, `${r.certificates} certificate${r.certificates === 1 ? "" : "s"}, ${r.prizes} prize${r.prizes === 1 ? "" : "s"} · by ${r.who}, ${r.time}`)),
+    el("div", { class: "row" }, r.files.map((f) => el("a", { href: `/roundfile?b=${encodeURIComponent(r.batch)}&name=${encodeURIComponent(f)}&t=${TOKEN}`, target: "_blank", rel: "noopener" }, what[f] || f)),
+      el("button", { onclick: () => act("/api/home/finder", { month: r.batch, what: "round" }) }, "Folder"),
+      r.latest ? el("button", { onclick: () => undo(r) }, "Undo…") : null));
+  const [latest, ...older] = rounds;
+  return el("div", { class: "card" }, el("h2", {}, "Rounds printed"),
+    el("p", { class: "muted" }, "Each round's one file to print: the class lists for bagging, then the certificates 2 per sheet."),
+    one(latest),
+    older.length ? el("details", {}, el("summary", {}, `Earlier rounds (${older.length})`), older.map(one)) : null);
+}
+
+function moveCard() {
+  return el("div", { class: "card warn" }, el("h2", {}, "Move the months into the inbox"),
+    el("p", {}, `This data folder still keeps sheets month by month (${state.months.map((m) => m.label).join(", ")}). The app now keeps every sheet in one inbox and prints them in rounds. Moving is a one-time step: scans and decisions go into the inbox, and each finished month's files become its "round 1".`),
+    el("button", { class: "primary", onclick: () => confirm("Move the month folders into the inbox now?") && act("/api/home/to_inbox", {}) }, "Move them"));
+}
+
 // ---------------------------------------------------------------- students: history and corrections
 const route = () => location.hash.startsWith("#student=") ? ["student", decodeURIComponent(location.hash.slice(9))]
                   : location.hash === "#students" ? ["students"] : location.hash === "#teachers" ? ["teachers"] : ["months"];
@@ -312,7 +386,9 @@ function studentView(id) {
       el("div", { class: "tl" }, person.timeline.map((e) => el("div", { class: "ev" + (e.cancelled ? " cancelled" : "") },
         el("div", { class: "when" }, e.time.slice(0, 10)),
         el("div", { class: "what" }, e.text),
-        e.cancelled || e.kind === "event_voided" || e.kind === "student_added" ? el("span") : el("button", { onclick: () => cancel(e), title: "Cancel this change (it stays visible, crossed out)" }, "Cancel"),
+        e.cancelled || e.kind === "event_voided" || e.kind === "student_added" ? el("span")
+          : e.kind === "prizes_given" ? el("button", { onclick: () => cancel(e), title: "The prize did not reach the child: it goes back on the next round's bagging list as owed" }, "Not handed out")
+          : el("button", { onclick: () => cancel(e), title: "Cancel this change (it stays visible, crossed out)" }, "Cancel"),
         el("div", { class: "meta" }, [`by ${e.who}`, e.sources.map((x) => x === "by hand" ? "entered by hand" : "from " + x).join(", "),
           e.cancelled ? `cancelled by ${e.cancelled_by}: ${e.cancel_reason}` : ""].filter(Boolean).join(" · ")))))),
   ];
@@ -341,6 +417,13 @@ function render() {
 
 function months() {
   const out = [];
+  if (state.pool) {
+    if (state.months.length) out.push(moveCard());
+    out.push(inboxCard(state.inbox));
+    const r = roundsCard(state.rounds || []);
+    if (r) out.push(r);
+    return out;
+  }
   const have = new Set(state.months.map((m) => m.key));
   if (state.suggested && !have.has(state.suggested)) {
     const pick = el("input", { type: "month", value: state.suggested });

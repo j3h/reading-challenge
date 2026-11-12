@@ -239,6 +239,11 @@ def cmd_reprint(args):
         print("  -", w)
 
 
+def cmd_to_inbox(args):
+    for line in runner.move_to_inbox(_data(args), _who(args)):
+        print(line)
+
+
 def cmd_snapshot(args):
     from rc import events as ev
     state = ev.EventLog(_data(args).root).state()
@@ -322,6 +327,9 @@ def main(argv=None):
     p.add_argument("--who")
     p.add_argument("--snapshot", metavar="CHECKPOINT", help="also rewrite this checkpoint from the events")
     p.set_defaults(fn=cmd_adjust)
+    p = sub.add_parser("to-inbox", help="one time: move the month folders into the inbox (finished months become round 1)")
+    p.add_argument("--who", help="your name, recorded in the event log")
+    p.set_defaults(fn=cmd_to_inbox)
     p = sub.add_parser("snapshot", help="write a checkpoint workbook from the event log")
     p.add_argument("out")
     p.set_defaults(fn=cmd_snapshot)

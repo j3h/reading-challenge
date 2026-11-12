@@ -1,33 +1,57 @@
-# Reading Challenge: how to do a month
+# Reading Challenge: how to do a round
 
 Everything happens in the **Reading Challenge** app. It opens in your web browser, but it runs only on
 this Mac: nothing goes on the internet except the scanned pages, which are sent to Claude to be read.
 
-## Each month
+## How it works
 
-1. **Scan** the month's sheets into one PDF (sheet-fed, one side, 300 dpi, colour or grey, *not* black and
-   white, which loses pencil).
-2. **Open Reading Challenge** (in Applications, or the Dock). Under **Start a month**, pick the month and press
-   **Start**. (It waits until last month is finished, so no month is ever left out.)
-3. **1 · Scans:** press **Add scans, photos or form CSV…** and choose:
-   - the scanned PDF;
+Every sheet goes into the **Inbox** and waits there until it's printed. When you're ready to hand things out,
+**print a round**: the certificates and class lists for every sheet that's settled, for the month you pick
+(last month, unless you change it). Anything still being sorted out just waits for the next round, and new sheets
+can be added at any time, so a late sheet is never a problem: it goes in the next round.
+
+Usually that's one big round early each month, and now and then a small one for stragglers.
+
+(The first time the app opens after this change it may offer to **Move the months into the inbox**: press it once.
+October becomes "October 2026 · round 1" and nothing else changes.)
+
+## A round
+
+1. **Scan** the sheets into one PDF (sheet-fed, one side, 300 dpi, colour or grey, *not* black and white, which
+   loses pencil).
+2. **Open Reading Challenge** (in Applications, or the Dock).
+3. **Inbox → Add scans, photos or form CSV…** and choose:
+   - the scanned PDF (give each scan its own name, e.g. "Sheets November 2026.pdf");
    - any sheets that came by email (photos are fine, including iPhone .heic);
    - the Google Form responses: in the response spreadsheet, File → Download → Comma-separated values (.csv).
-     Only the rows whose "Month" answer is this month are used, so it's fine that the file has every month in it.
-4. **2 · Read:** press **Read N pages**. It says roughly what it will cost (about 3½ cents a page) and shows
-   progress. A month of ~50 sheets takes a couple of minutes. If it stops (Wi-Fi dropped), press it again: pages
-   already read are kept.
-5. **3 · Review sheets →:** one row per sheet. Rows marked **needs a look** have a suggestion filled in, with
-   the handwriting shown under each value.
+     Every download has all the answers so far; add the new one with the same name and it replaces the old one.
+     Answers already printed aren't used again.
+4. **Read them** reads the new pages with Claude (about 3½ cents a page; a stack of ~50 sheets takes a couple of
+   minutes). If it stops (Wi-Fi dropped), press it again: pages already read are kept.
+5. **1 · Decide → Review sheets:** one row per sheet. Rows marked **needs a look** have a suggestion filled in,
+   with the handwriting shown under each value.
    - **Enter** accepts the row and moves to the next one that needs a look. **↑ ↓** move between rows.
    - **Accept all suggestions** does every row whose suggestion is complete; look at the rest one by one.
    - A child with **two sheets** gets a choice under the pages: **Add** (each sheet has its own total),
      **Replace** (this sheet's total already includes the other), or **Skip** (the same sheet twice).
+   - A child who **already got a certificate for that month** in an earlier round needs a choice:
+     - **Accept**: count it for that month and **print their certificate again** with the whole month's pages. Use
+       this when their certificate hasn't been handed out yet. On the class list they're marked "reprint" in orange,
+       only the prizes that are new are listed to bag, and the margin label says "REPLACES EARLIER": swap it for
+       the old one.
+     - **Hold for a later round**: the certificate is already handed out, so it counts next month instead.
+     - **Skip**: the same reading sent twice (e.g. a form and a paper sheet).
+   - A sheet that names a month the child already has pages for (e.g. "October" when the round is for November)
+     asks the same way: **Skip** if it's the same reading, **Accept** to count it for this round's month.
+   - **Hold for a later round** (H) works on any sheet: it waits, settled, until you **Bring it back**.
    - A child who isn't on the list: choose **New student…** and their teacher. Their other sheets will then
      offer them by name.
    - **W** shows the whole scanned sheet.
-6. **Finish month** (top right). You get:
-   - **certificates.pdf**: the one file to print, at **100% / actual size** (not "2 pages per sheet").
+   You don't have to settle everything: a round takes only what's ready. (A child with a sheet still open waits
+   whole, so their sheets are never split across rounds by accident.)
+6. **2 · Print a round** (home screen, or **Print round** at the top of the review): check the **Month** (it starts
+   at last month), then press it. You get, under **Rounds printed**:
+   - **Print this** (certificates.pdf): the one file to print, at **100% / actual size** (not "2 pages per sheet").
      - **Page 1 is the class lists** (sometimes 2 pages): what to bag for each child, class by class, the whole
        school's prize count at the top (for pulling prizes from stock), and anything **owed** from earlier.
        Lift it off before cutting.
@@ -35,10 +59,21 @@ this Mac: nothing goes on the internet except the scanned pages, which are sent 
        across the middle (the little marks at the edges show where), put the bottom pile under the top pile, and
        it's in the same order as the class list. The small grey label in the margin ("Barry · 3 of 6") puts a
        dropped pile back together; it comes off when you trim the edges.
-   - **summary.txt**: the prize totals, and at the top **Checks: all passed**. If it says **FAILED**, don't
+   - **Summary**: the prize totals, and at the top **Checks: all passed**. If it says **FAILED**, don't
      print it yet: ask for help.
-   - **checkpoint.xlsx**: everyone's totals. Next month starts from it. The **Sheets** tab has a row for every
-     scanned page, so any certificate can be checked against its sheet.
+   - **Spreadsheet** (checkpoint.xlsx): everyone's totals. The **Sheets** tab has a row for every sheet in the
+     round, so any certificate can be checked against its sheet.
+
+   The prizes on a round's class lists count as **handed out** once it's printed. If one never reached the child,
+   open their page under **Students** and press **Not handed out** next to it: it goes back on the next round's list,
+   marked "(owed)".
+
+## If a round was wrong
+
+Press **Undo…** next to the latest round. Its certificates, prizes and new students are cancelled (they stay in the
+history, crossed out), its files move to an "(undone …)" folder, and its sheets go back to the inbox with every
+choice you made: fix what was wrong and print the round again. Only the latest round can be undone (a later round
+started from its totals).
 
 ## Fixing one child
 
@@ -56,7 +91,7 @@ While reviewing a sheet, the open row shows that child's last few months and tot
 page in a new tab.
 
 If a correction means a child has passed a prize level they never got, the prize is listed as **owed** and goes on
-next month's cover page for their class, marked "(owed)".
+the next round's class list, marked "(owed)".
 
 ## Teachers and grades
 
@@ -64,12 +99,6 @@ next month's cover page for their class, marked "(owed)".
 moves class gets the new class's grade, so set each teacher's grade at the start of the year (or when a teacher
 changes grades). The list shows the grades the children in each class have now; **Set N students to grade X** brings
 the odd ones out into line, with the change kept in each child's history.
-
-## If something was wrong
-
-Open the month and press **Reopen month**. The finished files are kept in a dated folder, your review
-choices are all still there: fix the sheet, then **Finish month** again. (A month can't be reopened once the
-next month has been finished from it; reopen the later one first.)
 
 ## Spot-checking
 
@@ -79,8 +108,8 @@ total written in the monthly box).
 
 ## Old scans
 
-Scans and photos are kept while a month might still need fixing (6 months, changeable in Settings). After that the
-home screen offers to move them to the Trash. Totals, history and certificates always stay.
+Scans and photos stay in the inbox (printed ones too, so a child's page can still show their sheet). Totals,
+history and certificates always stay.
 
 ## When it's closed
 

@@ -213,7 +213,7 @@ def test_home_routes(server):
     assert status == 409 and b"already a scan" in body
     assert call(f"{base}/api/home/upload?m=2026-10&name=x.pdf", raw=pdf)[0] == 403        # no token
     status, page = call(base + "/review?m=2026-10")
-    assert status == 200 and b"All months" in page
+    assert status == 200 and "← Home".encode() in page
     rv.save_records([rv.SheetRecord("s.pdf", 1, "Ada Example", "Lopez", "October", 30)],
                     home.month("2026-10").records_path)
     status, body = call(f"{base}/api/state?m=2026-10&t={token}")
@@ -333,3 +333,44 @@ def test_a_students_page_has_a_row_per_month_with_links_to_kept_sheets(tmp_path)
     assert months[0]["sheets"] == [{"text": "oct.pdf p. 1", "month": "2026-10", "key": "oct.pdf#1"}]
     assert months[1]["sheets"][0]["key"] == ""                       # a workbook row has no picture
     assert [m["jump"] for m in months] == [0, 0]
+
+
+# ---------------------------------------------------------------- the inbox and rounds (folders with an event log)
+@pytest.fixture
+def logged(tmp_path):
+    from rc import events as ev
+    root = tmp_path / "logged"
+    root.mkdir()
+    wb = ({"workbook": "master.xlsx", "tab": "September 2026", "row": 2},)
+    ev.EventLog(root, "mac").append([
+        ev.Event("student_added", {"student": "S0001", "name": "Ada Example", "teacher": "Lopez", "grade": "2"}, "Josh",
+                 "", wb, "2026-09-28T12:00:00+00:00")])
+    return root
+
+
+def test_the_inbox_takes_scans_and_forms_and_prints_rounds(logged, monkeypatch):
+    monkeypatch.setenv("READING_CHALLENGE_WHO", "Jamie")
+    home = app_mod.Home(logged)
+    st = home.state()
+    assert st["pool"] and st["inbox"]["counts"] is None and st["rounds"] == []
+    csv1 = b"Timestamp,Student Name,Grade and Teacher,Month,Pages\n11/3/2026 9:00:00,Ada Example,2nd- Lopez,October,30\n"
+    home.add_scan("inbox", "Responses.csv", io.BytesIO(csv1), len(csv1))
+    st = home.set_round_month("2026-10")
+    assert st["inbox"]["counts"]["ready"] == 1 and st["inbox"]["next_round"] == 1
+    st = home.do_round()
+    assert [(r["label"], r["round"], r["certificates"]) for r in st["rounds"]] == [("October 2026", 1, 1)]
+    assert home.round_file(st["rounds"][0]["batch"], "certificates.pdf").exists()
+    # a fresh download of the responses replaces the old one: only the new row waits
+    csv2 = csv1 + b"11/9/2026 9:00:00,Ada Example,2nd- Lopez,November,12\n"
+    st = home.add_scan("inbox", "Responses.csv", io.BytesIO(csv2), len(csv2))
+    assert st["inbox"]["counts"]["printed"] == 1
+    # ... but one that lost or moved answers is refused
+    csv3 = b"Timestamp,Student Name,Grade and Teacher,Month,Pages\n11/9/2026 9:00:00,Ada Example,2nd- Lopez,November,12\n"
+    with pytest.raises(ck.CheckpointError, match="same rows"):
+        home.add_scan("inbox", "Responses.csv", io.BytesIO(csv3), len(csv3))
+    # scans with the same name as one already there are refused
+    home.add_scan("inbox", "a.pdf", io.BytesIO(pdf_bytes(1)), len(pdf_bytes(1)))
+    with pytest.raises(ck.CheckpointError, match="already a scan"):
+        home.add_scan("inbox", "a.pdf", io.BytesIO(pdf_bytes(1)), len(pdf_bytes(1)))
+    st = home.undo_round(st["rounds"][0]["batch"], "testing")
+    assert st["rounds"] == []

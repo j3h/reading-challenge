@@ -27,7 +27,7 @@ from rc import runner
 
 PAGE = Path(__file__).with_name("review_table.html")    # the review screen: a table, one row per sheet
 IMAGE_DPI = 110
-STATUS_OPEN, STATUS_AUTO, STATUS_DECIDED, STATUS_SKIPPED = "open", "auto", "decided", "skipped"
+STATUS_OPEN, STATUS_AUTO, STATUS_DECIDED, STATUS_SKIPPED, STATUS_HELD = "open", "auto", "decided", "skipped", "held"
 
 
 class ReviewApp:
@@ -81,12 +81,34 @@ class ReviewApp:
                 "form": self._form(item, cp, d, sug, plan),
                 "candidates": [self._cand(c, plan) for c in (match.candidates[:6] if match else [])],
                 "duplicate": item.dup,
+                "repeat": any(i.key == r.key and i.kind == "repeat" for i in plan.issues) or bool(d.get("repeat_ok")),
             })
+        pool = isinstance(m, runner.Pool)
+        if pool:                                  # held sheets: settled or not, kept out of rounds until brought back
+            for r in m.held():
+                d = decisions.get(r.key, {})
+                item = rv.Settled(r, student_id=d.get("student") if d.get("student") in cp.students else None,
+                                  pages=d.get("pages", r.pages))
+                sheets.append({
+                    "key": r.key, "label": r.label, "file": r.file, "page": r.page,
+                    "read": {"name": r.name, "teacher": r.teacher, "month": r.month, "pages": r.pages,
+                             "confidence": r.confidence, "pages_confidence": r.pages_confidence, "note": r.note,
+                             "boxes": sorted(r.boxes), "form": r.is_form, "submitted": r.submitted, "grade": r.grade},
+                    "status": STATUS_HELD, "decision": d, "outcome": "held for a later round",
+                    "warnings": [], "reasons": [], "can_accept": False, "needs_choice": False,
+                    "form": self._form(item, cp, d, None, plan), "candidates": [], "duplicate": None})
         counts = {k: sum(1 for s in sheets if s["status"] == k)
-                  for k in (STATUS_OPEN, STATUS_AUTO, STATUS_DECIDED, STATUS_SKIPPED)}
+                  for k in (STATUS_OPEN, STATUS_AUTO, STATUS_DECIDED, STATUS_SKIPPED) + ((STATUS_HELD,) if pool else ())}
+        extra = {}
+        if pool:
+            month = m.round_month
+            extra = {"pool": True, "round_month": month, "round_label": ck.month_label(month),
+                     "next_round": m.next_round_number(month), "round": m.counts()}
         return {
-            "finished": False, "month": ck.month_label(m.folder.month), "source": source,
-            "ready": plan.ready and any(s["status"] in (STATUS_AUTO, STATUS_DECIDED) for s in sheets),
+            **extra,
+            "finished": False, "month": "Inbox" if pool else ck.month_label(m.folder.month), "source": source,
+            "ready": (bool(extra["round"]["children"]) if pool else
+                      plan.ready and any(s["status"] in (STATUS_AUTO, STATUS_DECIDED) for s in sheets)),
             "counts": counts, "acceptable": sum(1 for s in sheets if s["status"] == STATUS_OPEN and s["can_accept"]
                                                 and not s["needs_choice"]),
             "sheets": sheets, "teachers": teachers, "teacher_grades": grades,
@@ -168,8 +190,15 @@ class ReviewApp:
     def finish(self) -> dict:
         from rc import settings
         with self._lock:
-            self.month.finish(who=settings.who())
+            text = self.month.finish(who=settings.who())
+        if isinstance(self.month, runner.Pool):
+            return {**self.state(), "printed": text}
         return self.state()
+
+    def _all_records(self):
+        """Every sheet whose image may be asked for (in the inbox: printed and held ones too)."""
+        m = self.month
+        return m.all_records() if isinstance(m, runner.Pool) else m.records()
 
     # the month's finished files, by the name the page uses: (path, content type)
     def output(self, name: str) -> tuple[Path, str]:
@@ -195,7 +224,7 @@ class ReviewApp:
         with self._lock:
             if cache in self._images:
                 return self._images[cache]
-            rec = next((r for r in self.month.records() if r.key == key), None)
+            rec = next((r for r in self._all_records() if r.key == key), None)
             if rec is None or field not in rec.boxes:
                 raise KeyError(cache)
             x0, y0, x1, y1 = rec.boxes[field]
@@ -212,7 +241,7 @@ class ReviewApp:
         with self._lock:
             if key in self._images:
                 return self._images[key]
-            rec = next((r for r in self.month.records() if r.key == key), None)
+            rec = next((r for r in self._all_records() if r.key == key), None)
             if rec is None or rec.is_form or not (self.month.folder.scans / rec.file).exists():
                 raise KeyError(key)                   # unknown, typed in a form, or the scan was let go
             path = self.month.folder.scans / rec.file
@@ -227,7 +256,7 @@ class ReviewApp:
 
 
 _DECISION_KEYS = {"student", "remember_name", "new_student", "skip", "pages", "pages_ok", "month_ok", "duplicate",
-                  "teacher"}
+                  "teacher", "hold", "repeat_ok"}
 
 
 # ---------------------------------------------------------------------------- HTTP
@@ -309,6 +338,12 @@ def make_server(app: ReviewApp | None = None, port: int = 0, home=None) -> tuple
                     return self._send(200, review_for(query).scan_crop(query["key"][0], query["field"][0]), "image/jpeg")
                 if url.path == "/scan":
                     return self._send(200, review_for(query).scan_image(query["key"][0]), "image/jpeg")
+                if url.path == "/roundfile" and home is not None:
+                    path = home.round_file(query["b"][0], query["name"][0])
+                    ctype = {".pdf": "application/pdf", ".txt": "text/plain; charset=utf-8"}.get(
+                        path.suffix, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                    return self._send(200, path.read_bytes(), ctype,
+                                      download=None if ctype.startswith(("application/pdf", "text/")) else path.name)
                 if url.path.startswith("/file/"):
                     path, ctype = review_for(query).output(url.path[len("/file/"):])
                     return self._send(200, path.read_bytes(), ctype,
@@ -363,6 +398,14 @@ def make_server(app: ReviewApp | None = None, port: int = 0, home=None) -> tuple
                 return home.start_reading(month)
             if action == "reopen":
                 return home.reopen(month, str(body.get("reason", "")))
+            if action == "round_month":
+                return home.set_round_month(month)
+            if action == "round":
+                return home.do_round()
+            if action == "undo_round":
+                return home.undo_round(str(body.get("batch", "")), str(body.get("reason", "")))
+            if action == "to_inbox":
+                return home.move_to_inbox()
             if action == "who":
                 return home.set_who(str(body.get("name", "")))
             if action == "let_go":

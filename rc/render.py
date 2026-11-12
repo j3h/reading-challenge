@@ -235,34 +235,41 @@ def _save(doc, toc, out_path):
     doc.save(str(out_path), garbage=4, deflate=True)
 
 
-def render_print_file(results, month, out_path, table=None, owed_rows=()) -> list[str]:
+def render_print_file(results, month, out_path, table=None, owed_rows=(), reprints=None) -> list[str]:
     """The one file to print: the class lists for bagging first (pull those pages off before cutting), then the
-    certificates two to a sheet, each class on its own sheets, cut and stack. Returns warnings."""
+    certificates two to a sheet, each class on its own sheets, cut and stack. Returns warnings.
+
+    `reprints`: {student id: (the month's pages so far, every level reached this month)} for a child whose certificate
+    for this month was printed in an earlier round: theirs is printed again with the whole month (it replaces the
+    earlier one), while the class list still bags only the prizes that are new."""
     warnings: list[str] = []
-    doc = _class_lists_doc(results, month, owed_rows, warnings)
+    doc = _class_lists_doc(results, month, owed_rows, warnings, reprints or {})
     lists = doc.page_count
-    certs, toc = _certificates_doc(results, month, table, warnings)
+    certs, toc = _certificates_doc(results, month, table, warnings, reprints or {})
     doc.insert_pdf(certs)
     _save(doc, [[1, "Class lists for bagging", 1]] + [[lv, title, page + lists] for lv, title, page in toc], out_path)
     return warnings
 
 
-def _certificates_doc(results, month, table, warnings):
+def _certificates_doc(results, month, table, warnings, reprints=None):
+    reprints = reprints or {}
     table = table or mc.load_levels()
     label = ck.month_label(ck.month_key(month))
     singles = pymupdf.open()                       # each certificate on its own page first, exactly as designed
     runs = []
     for teacher, rs in ck.classrooms(results):
-        runs.append((teacher, singles.page_count, len(rs)))
+        runs.append((teacher, singles.page_count, [r.student.id in reprints for r in rs]))
         for r in rs:
-            row = {"name": r.student.name, "pages": str(r.pages), "total_pages": str(r.student.total),
+            pages, levels = reprints.get(r.student.id, (r.pages, r.prizes))
+            row = {"name": r.student.name, "pages": str(pages), "total_pages": str(r.student.total),
                    "_default_month": label}
-            mc.draw_certificate(singles, row, [p[1] for p in r.prizes], warnings.append, table)
+            mc.draw_certificate(singles, row, [p[1] for p in levels], warnings.append, table)
     singles.subset_fonts()
     singles = pymupdf.open("pdf", singles.tobytes())   # placing pages needs a finished document
     out = pymupdf.open()
     toc = []
-    for teacher, first, n in runs:
+    for teacher, first, again in runs:
+        n = len(again)
         toc.append([1, f"{teacher} ({n})", out.page_count + 1])
         for top, bottom in cut_and_stack(n):
             sheet = out.new_page(width=SHEET_W, height=SHEET_H)
@@ -271,7 +278,7 @@ def _certificates_doc(results, month, table, warnings):
                     continue
                 y0 = half * HALF_H + (HALF_H - CERT_H) / 2
                 sheet.show_pdf_page(pymupdf.Rect(CERT_X, y0, CERT_X + CERT_W, y0 + CERT_H), singles, first + idx)
-                tag = f"{teacher}  ·  {idx + 1} of {n}  ·  {label}"
+                tag = f"{teacher}  ·  {idx + 1} of {n}  ·  {label}" + ("  ·  REPLACES EARLIER" if again[idx] else "")
                 sheet.insert_text((CERT_X / 2 + 3, y0 + CERT_H / 2 + 60), tag, fontsize=7, color=GREY, rotate=90)
             for x0, x1 in ((18, 42), (SHEET_W - 42, SHEET_W - 18)):     # where to cut
                 sheet.draw_line((x0, HALF_H), (x1, HALF_H), color=GREY, width=0.5)
@@ -293,7 +300,8 @@ def render_class_lists(results, month, out_path, owed_rows=()) -> list[str]:
     return warnings
 
 
-def _class_lists_doc(results, month, owed_rows, warnings):
+def _class_lists_doc(results, month, owed_rows, warnings, reprints=None):
+    reprints = reprints or {}
     """Every class's bagging list on as few letter pages as possible (two columns), with the whole school's prize
     count first, for pulling prizes from stock. Prizes owed from earlier months are included, marked "(owed)"."""
     label = ck.month_label(ck.month_key(month))
@@ -369,8 +377,9 @@ def _class_lists_doc(results, month, owed_rows, warnings):
             page.draw_rect(pymupdf.Rect(x, y - 7, x + 7, y), color=mc.BLACK, width=0.6)
             for i, ln in enumerate(name_lines):
                 _text(t, x + 12, y + i * LIST_LINE, ln, size)
-            _right(t, x + LIST_COL_W, y, f"{r.pages:,} pp" if r.pages is not None else "owed only",
-                   LIST_SIZE - 0.5, GREY)
+            again = reprints.get(s.id)
+            _right(t, x + LIST_COL_W, y, (f"reprint, {again[0]:,} pp" if again else f"{r.pages:,} pp")
+                   if r.pages is not None else "owed only", LIST_SIZE - 0.5, (0.75, 0.3, 0.05) if again else GREY)
             y += len(name_lines) * LIST_LINE
             for ln in prize_lines:
                 _text(t, x + 12, y, ln, LIST_SIZE - 0.5, color=(0.15, 0.3, 0.55))

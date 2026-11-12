@@ -29,6 +29,7 @@ from rc import workspace as wsp
 SCAN_EXTS = wsp.SCAN_EXTS | wsp.PHOTO_EXTS | wsp.FORM_EXTS
 MAX_UPLOAD = 500 * 1024 * 1024          # a month's scan is ~50 MB
 MONTH_DIR = re.compile(r"\d{4}-\d{2}")
+INBOX = "inbox"
 
 
 @dataclass
@@ -64,12 +65,22 @@ class Home:
         return wsp.Workspace(self.root)
 
     def month(self, month: str) -> runner.Month:
+        if month == INBOX:
+            return self.pool()
         return runner.Month(self.ws, month)
 
+    def pool(self) -> runner.Pool:
+        return runner.Pool(self.ws)
+
+    def uses_pool(self) -> bool:
+        """A data folder with an event log works with the inbox and rounds; older ones month by month."""
+        from rc import events as ev
+        return ev.EventLog(self.ws.root).has_students()
+
     def review(self, month: str):
-        """The review screen's backend for one month (kept, so scan images stay cached)."""
+        """The review screen's backend for the inbox or one month (kept, so scan images stay cached)."""
         from rc import review_web
-        key = ck.month_key(month)
+        key = INBOX if month == INBOX else ck.month_key(month)
         if key not in self._reviews:
             self._reviews[key] = review_web.ReviewApp(self.month(key))
         return self._reviews[key]
@@ -173,16 +184,108 @@ class Home:
                if self.job else None, "mac": sys.platform == "darwin"}
         out["keep_raw_months"] = settings.keep_raw_months()
         if out["folder_ok"]:
+            out["pool"] = self.uses_pool()
+            if out["pool"]:
+                out["inbox"] = self.inbox_status()
+                out["rounds"] = self.rounds()
             out["prunable"] = self.prunable()
             out["months"] = [self.month_status(k) for k in self.months()]
             out["unfinished"] = [m["label"] for m in out["months"] if not m["finished"]]
-            out["suggested"] = "" if out["unfinished"] else self.suggested_month()
+            out["suggested"] = "" if out["unfinished"] or out["pool"] else self.suggested_month()
             try:
                 if out["suggested"]:
                     _, out["suggested_starts_from"] = self.ws.previous_checkpoint(out["suggested"])
             except ck.CheckpointError as e:
                 out["suggested_starts_from"] = str(e)
         return out
+
+    # ------------------------------------------------------------------ the inbox and rounds
+    def inbox_status(self) -> dict:
+        p = self.pool()
+        f = p.folder
+        if f.scans.is_dir():
+            f.convert_photos()                      # photos dropped in with Finder
+        scans = [{"name": x.name, "pages": self._page_count(x), "mb": round(x.stat().st_size / 1e6, 1)}
+                 for x in f.scan_files()]
+        pages = sum(x["pages"] for x in scans)
+        raw = f.work / "raw"
+        read = sum(1 for x in raw.glob("*.json")) if raw.is_dir() else 0
+        from rc import forms as forms_mod
+        since = p.settings().get("forms_from", "")
+        forms = []
+        for x in (f.form_files() if f.scans.is_dir() else []):
+            try:
+                forms.append({"name": x.name, "rows": len(forms_mod.pool_records(x, since)[0])})
+            except ck.CheckpointError as e:
+                forms.append({"name": x.name, "rows": 0, "problem": str(e)})
+        state = p.log.state()
+        month = p.round_month
+        out = {"folder": str(f.path), "scans": scans, "pages": pages, "read": min(read, pages), "forms": forms,
+               "estimate": round(max(pages - read, 0) * extract.COST_PER_PAGE, 2),
+               "still_in_icloud": len(wsp.cloud_placeholders(f.path)) if f.path.is_dir() else 0,
+               "round_month": month, "round_label": ck.month_label(month),
+               "round_default": month == p.default_round_month(state),
+               "latest_round_month": p.latest_round_month(state),
+               "next_round": p.next_round_number(month, state), "problem": "", "counts": None}
+        if p.records_path.exists() or forms:
+            try:
+                out["counts"] = p.counts()
+            except ck.CheckpointError as e:
+                out["problem"] = str(e)
+        return out
+
+    def rounds(self) -> list[dict]:
+        """Every round printed (live), newest first, with its files."""
+        from rc import events as ev
+        st = ev.EventLog(self.ws.root).state()
+        out = []
+        for i, e in enumerate(reversed(st.rounds)):
+            folder = runner.round_folder_for(self.ws, e)
+            batch = [x for x in st.events if x.batch == e.batch and x.id not in st.voided]
+            out.append({"batch": e.batch, "month": e.data["month"], "label": ck.month_label(e.data["month"]),
+                        "round": e.data.get("round", 1), "who": e.who, "time": e.time[:16].replace("T", " "),
+                        "certificates": sum(1 for x in batch if x.kind == "pages_recorded"),
+                        "prizes": sum(len(x.data["levels"]) for x in batch if x.kind == "prizes_given"),
+                        "folder": str(folder.path), "latest": i == 0,
+                        "files": [n for n in (wsp.CERTIFICATES, wsp.SUMMARY, wsp.CHECKPOINT)
+                                  if (folder.path / n).exists()]})
+        return out
+
+    def set_round_month(self, month: str) -> dict:
+        self.pool().set_round_month(month)
+        self._reviews.pop(INBOX, None)
+        return self.state()
+
+    def do_round(self) -> dict:
+        self.pool().finish(who=settings.who())
+        self._reviews.pop(INBOX, None)
+        return self.state()
+
+    def undo_round(self, batch: str, reason: str) -> dict:
+        self.pool().undo_round(batch, settings.who(), reason)
+        self._reviews.pop(INBOX, None)
+        return self.state()
+
+    def round_file(self, batch: str, name: str) -> Path:
+        from rc import events as ev
+        if name not in (wsp.CERTIFICATES, wsp.SUMMARY, wsp.CHECKPOINT):
+            raise KeyError(name)
+        st = ev.EventLog(self.ws.root).state()
+        e = next((x for x in st.rounds if x.batch == batch), None)
+        if e is None:
+            raise KeyError(batch)
+        path = runner.round_folder_for(self.ws, e).path / name
+        if not path.exists():
+            raise KeyError(name)
+        return path
+
+    def move_to_inbox(self) -> dict:
+        who = settings.who()
+        if not who:
+            raise ck.CheckpointError("add your name in Settings first: it is recorded on every change")
+        runner.move_to_inbox(self.ws, who)
+        self._reviews = {}
+        return self.state()
 
     # ------------------------------------------------------------------ steps
     def create_month(self, month: str) -> dict:
@@ -206,8 +309,9 @@ class Home:
         if f.is_finished():
             raise ck.CheckpointError(f"{ck.month_label(f.month)} is finished; reopen it to add scans")
         target = f.scans / name
-        if target.exists():
-            raise ck.CheckpointError(f"there is already a scan called {name!r} in this month")
+        replacing = target.exists() and target.suffix.lower() in wsp.FORM_EXTS and month == INBOX
+        if target.exists() and not replacing:      # a form download holds every answer so far: the new one replaces it
+            raise ck.CheckpointError(f"there is already a scan called {name!r} here; rename the file")
         tmp = f.scans / f".{name}.uploading"
         try:
             with open(tmp, "wb") as out:
@@ -220,7 +324,18 @@ class Home:
                     left -= len(chunk)
             if target.suffix.lower() in wsp.FORM_EXTS:
                 from rc import forms as forms_mod
-                forms_mod.records(tmp, f.month)            # refuses a CSV without name and pages columns
+                if month == INBOX:                         # refuses a CSV without name and pages columns
+                    new_rows = forms_mod.pool_records(tmp, "")[0]
+                    if replacing:                          # a download is cumulative: it must still hold the old rows
+                        old = {r.page: r.submitted for r in forms_mod.pool_records(target, "")[0]}
+                        new = {r.page: r.submitted for r in new_rows}
+                        moved = [row for row, t in old.items() if t and new.get(row) != t]
+                        if moved:
+                            raise ck.CheckpointError(f"{name}: the new download does not have the same answers in the "
+                                                     f"same rows as the old one (first: row {moved[0]}); were answers "
+                                                     f"deleted from the sheet?")
+                else:
+                    forms_mod.records(tmp, f.month)
             if target.suffix.lower() == ".pdf":
                 try:
                     with pymupdf.open(tmp) as doc:
@@ -232,6 +347,7 @@ class Home:
         finally:
             tmp.unlink(missing_ok=True)
         f.convert_photos()
+        self._reviews.pop(INBOX if month == INBOX else f.month, None)
         return self.state()
 
     def start_reading(self, month: str, client=None) -> dict:
@@ -242,14 +358,14 @@ class Home:
             m = self.month(month)
             if m.folder.is_finished():
                 raise ck.CheckpointError(f"{ck.month_label(m.folder.month)} is finished; reopen it first")
-            status = self.month_status(m.folder.month)
+            status = self.inbox_status() if month == INBOX else self.month_status(m.folder.month)
             if not status["scans"]:
                 raise ck.CheckpointError("add the scans first")
             if status["still_in_icloud"]:
                 raise ck.CheckpointError("some files are still downloading from iCloud; open the month's folder in "
                                          "Finder, wait for them, then try again")
             client = client or extract.make_client()
-            job = self.job = ReadJob(m.folder.month, total=status["pages"])
+            job = self.job = ReadJob(INBOX if month == INBOX else m.folder.month, total=status["pages"])
 
         def page_done(ok, sent):
             job.done += 1
@@ -263,7 +379,7 @@ class Home:
                 job.result = (f"Read {len(records)} sheet(s)" +
                               (f"; {len(dropped)} page(s) were not reading sheets" if dropped else "") +
                               f". Cost: {extract.cost_estimate(usage, extract.DEFAULT_MODEL)}")
-                self._reviews.pop(m.folder.month, None)
+                self._reviews.pop(job.month, None)
             except Exception as e:  # shown on the page in words
                 job.error = _plain(e)
             finally:
@@ -496,7 +612,9 @@ class Home:
         if "scan" in src or "photo" in src:
             file = src.get("scan") or src.get("photo")
             try:
-                if (self.month(month).folder.scans / file).exists():
+                if (self.ws.inbox().scans / file).exists():
+                    month, key = INBOX, f"{file}#{src.get('page', 1)}"
+                elif (self.month(month).folder.scans / file).exists():
                     key = f"{file}#{src.get('page', 1)}"
             except ck.CheckpointError:
                 pass
@@ -505,8 +623,11 @@ class Home:
     def show_in_finder(self, month: str | None = None, what: str = "folder") -> None:
         if sys.platform != "darwin":
             raise ck.CheckpointError("only on a Mac")
-        target = self.month(month).folder.scans if month and what == "scans" else \
-            self.month(month).folder.path if month else self.ws.root
+        if what == "round":
+            target = self.round_file(month, wsp.SUMMARY).parent if month else self.ws.root
+        else:
+            target = self.month(month).folder.scans if month and what == "scans" else \
+                self.month(month).folder.path if month else self.ws.root
         target.mkdir(parents=True, exist_ok=True)
         subprocess.run(["open", str(target)], check=True)
 
