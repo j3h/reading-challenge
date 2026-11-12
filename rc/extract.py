@@ -114,18 +114,45 @@ def parse_page_range(text: str | None, count: int) -> list[int]:
     return sorted(pages)
 
 
+MAX_SIDE = 2000              # px: a letter page at 150 dpi is 1275 x 1650; phone-made PDFs can be 30+ inches tall
+MAX_BYTES = 4_500_000        # well under the API's 10 MB image limit (which counts the base64 text)
+
+
+def page_pixmap(page, dpi: int, max_side: int = MAX_SIDE):
+    """A PDF page as an RGB pixmap at `dpi`, scaled down if its longer side would exceed `max_side` pixels."""
+    zoom = min(dpi / 72, max_side / max(page.rect.width, page.rect.height))
+    return page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), colorspace=pymupdf.csRGB)
+
+
+def image_pixmap(path, max_side: int = MAX_SIDE):
+    """A picture file as an RGB pixmap, its longer side at most `max_side` pixels."""
+    pix = pymupdf.Pixmap(str(path))
+    if pix.colorspace is None or pix.n - pix.alpha != 3:
+        pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
+    if pix.alpha:
+        pix = pymupdf.Pixmap(pix, 0)
+    while max(pix.width, pix.height) > max_side:
+        pix.shrink(1)                                     # halves each side
+    return pix
+
+
+def to_jpeg(pix, quality: int = 85) -> bytes:
+    """JPEG bytes, lowering the quality if needed to stay under MAX_BYTES."""
+    data = pix.tobytes("jpeg", jpg_quality=quality)
+    while len(data) > MAX_BYTES and quality > 40:
+        quality -= 15
+        data = pix.tobytes("jpeg", jpg_quality=quality)
+    return data
+
+
 def render_pages(path: Path, pages: str | None, dpi: int):
     """Yield (page number, jpeg bytes) for a PDF, or the single image for a picture file."""
     if path.suffix.lower() == ".pdf":
         doc = pymupdf.open(path)
         for n in parse_page_range(pages, doc.page_count):
-            pix = doc[n - 1].get_pixmap(dpi=dpi, colorspace=pymupdf.csRGB)
-            yield n, pix.tobytes("jpeg", jpg_quality=85)
+            yield n, to_jpeg(page_pixmap(doc[n - 1], dpi))
     else:
-        pix = pymupdf.Pixmap(str(path))
-        if pix.colorspace is None or pix.n - pix.alpha != 3:
-            pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
-        yield 1, pix.tobytes("jpeg", jpg_quality=85)
+        yield 1, to_jpeg(image_pixmap(path))
 
 
 # ------------------------------------------------------------------ calling the model
@@ -254,6 +281,9 @@ def extract_month(client, month_folder: wsp.MonthFolder, model: str = DEFAULT_MO
         raise ExtractionError(f"{len(failures)} page(s) could not be read; nothing was saved as records. "
                               f"Fix the cause and run again (pages already read are kept):\n" + "\n".join(lines))
     records, dropped = [], []
+    digests, changed = month_folder.registry().check()
+    if changed:
+        raise ExtractionError("; ".join(changed))
     usage = {"input_tokens": 0, "output_tokens": 0, "pages_sent": 0}
     for (file, n), saved, _, fresh in results:
         if fresh:      # cost covers only pages sent this run; answers kept from earlier runs cost nothing now
@@ -261,8 +291,13 @@ def extract_month(client, month_folder: wsp.MonthFolder, model: str = DEFAULT_MO
             usage["output_tokens"] += saved["usage"]["output_tokens"]
             usage["pages_sent"] += 1
         rec = to_record(file, n, saved["answer"])
+        if rec:
+            rec = rv.SheetRecord(**{**rec.__dict__, "digest": digests.get(file, "")})
         (records.append(rec) if rec else dropped.append(f"{file} p. {n}"))
-    rv.save_records(records, month_folder.work / "records.json")
+    here = {f.name for f in files}
+    old = month_folder.work / "records.json"
+    kept = [r for r in rv.load_records(old) if r.file not in here] if old.exists() else []   # filed away, or let go
+    rv.save_records(kept + records, old)
     return records, dropped, usage
 
 

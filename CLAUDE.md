@@ -105,7 +105,10 @@ except extraction (OCR), the review UI and the one-command runner.
 - Python: the system `python3` shim is broken on this Mac; use `uv venv .venv && uv pip install -r requirements.txt`.
 
 ## Inbox and rounds (`runner.Pool`; how a data folder with an event log works now)
-- One `Inbox/` (scans/, work/{records.json, decisions.json, pool.json, raw/}) instead of month folders. A sheet is
+- `Scans/` (every file as it arrived, never moved; uploads get a `YYYY-MM-DD ` prefix, Finder drop-ins are fine)
+  and `App working files (do not edit)/` (records.json, decisions.json, pool.json, files.json, raw/) instead of
+  month folders; `Inbox.txt` is written for people (`Pool.write_inbox_list`, only when it changes) and never read.
+  `runner.to_scans_layout` converts the first inbox layout (Inbox/scans, Inbox/work, '<round>/scans') once. A sheet is
   open / ready / held (`{"hold": true}`) / filed. A round (`Pool.finish`) prints the ready ones for the round month
   (`pool.json` `round_month`, default: last calendar month, never older than the latest round) into
   `<season>/<YYYY-MM> round <n>/`; its `month_finished` event carries `round` and `keys` (sheets it used; replay ->
@@ -115,8 +118,17 @@ except extraction (OCR), the review UI and the one-command runner.
   already has pages for: `runner.reprint_map` -> the round prints their certificate again with the whole month (pages
   and every level reached that month; margin "REPLACES EARLIER"); the class list says "reprint" and bags only the new
   prizes (events record only this round's pages and new prizes).
-- Form CSVs: `forms.pool_records` (month answer resolved against the submit date; rows before `forms_from` ignored);
-  re-uploading the same name replaces the download only if every old row is unchanged. Keys are `file#row`.
+- Form CSVs: `forms.pool_records` (month answer resolved against the submit date; rows before `forms_from` ignored).
+  Keys are `file#row`, but an answer is identified by `forms.row_digest` (SHA-256 of its cells): a re-download
+  replaces the file, decisions follow answers to their new rows (`Home._follow_answers`), and answers filed before
+  digests existed get a `sheets_filed` with `digests` in their round's batch first. `Pool.is_filed`: forms by digest
+  (by key only if no digest was ever recorded for that key), scans by key.
+- Fingerprints: `wsp.FileRegistry` (`work/files.json`, SHA-256 of every file under scans/ incl. originals/, as first
+  seen; rehash only when size/mtime change). Same bytes under a new name are refused on upload; a scan whose content
+  changed is a problem that blocks rounds and extraction. `SheetRecord.digest` = file SHA-256 (scans/photos) or row
+  digest (forms); event sources carry it as `sha256` / `row_sha256`; a round's `month_finished` has `digests`
+  aligned with `keys`. The digest is of the stored file: downscaling for the API (`extract.page_pixmap`, max 2000 px)
+  happens in memory only.
 - `Pool.undo_round` (latest only) voids its batch and renames the folder "(undone …)". `move_to_inbox` / `to-inbox` /
   the app's "Move them" card: one-time migration; a finished month's files become round 1 and a `sheets_filed` event
   in its finish batch marks its sheets filed. Month folders (`runner.Month`) remain for folders without a log.

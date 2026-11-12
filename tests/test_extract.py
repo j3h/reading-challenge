@@ -216,3 +216,20 @@ def test_where_each_value_was_read_is_kept_and_bad_boxes_are_dropped():
     assert r.boxes == {"name": [600, 50, 900, 90], "total": [700, 850, 800, 890]}
     assert ex.to_record("s.pdf", 1, answer()).boxes == {}          # answers saved before boxes existed
     assert set(ex.SCHEMA["properties"]["boxes"]["required"]) == {"name", "teacher", "month", "total"}
+
+
+def test_a_huge_page_is_scaled_down_to_a_readable_size(tmp_path):
+    """Phone-made PDFs can have pages 3 feet tall: at 150 dpi that is over the API's 10 MB image limit."""
+    import pymupdf
+    doc = pymupdf.open()
+    page = doc.new_page(width=2654, height=4055)
+    page.insert_text((100, 200), "Ada Example", fontsize=80)
+    doc.save(tmp_path / "big.pdf")
+    (n, jpeg), = list(ex.render_pages(tmp_path / "big.pdf", None, ex.DEFAULT_DPI))
+    pix = pymupdf.Pixmap(jpeg)
+    assert max(pix.width, pix.height) == ex.MAX_SIDE and len(jpeg) < ex.MAX_BYTES
+    letter = pymupdf.open()
+    letter.new_page(width=612, height=792)
+    letter.save(tmp_path / "letter.pdf")
+    (n, jpeg), = list(ex.render_pages(tmp_path / "letter.pdf", None, ex.DEFAULT_DPI))
+    assert pymupdf.Pixmap(jpeg).height == 1650                       # an ordinary scan is not touched

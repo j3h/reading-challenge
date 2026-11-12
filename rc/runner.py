@@ -8,6 +8,7 @@ so a month counts as finished only when all three outputs exist.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from collections import Counter
 
 import make_certificates as mc
@@ -74,6 +75,10 @@ class Month:
 
     def decisions(self) -> dict:
         return rv.load_decisions(self.decisions_path)
+
+    def scan_path(self, file: str):
+        """Where a scan or photo is now."""
+        return self.folder.scans / file
 
     def plan(self) -> rv.Plan:
         if self.folder.is_finished():
@@ -242,10 +247,16 @@ class Pool(Month):
         cp.month = max((h.month for h in cp.history if h.month < month), default=None)
         return cp, f"the event log ({len(state.events)} events, as of now)"
 
+    def file_check(self) -> tuple[dict, list[str]]:
+        """({file: SHA-256}, [files whose contents changed since they were added])."""
+        return self.folder.registry().check()
+
     def all_records(self) -> list[rv.SheetRecord]:
         """Every sheet the inbox holds, printed or not: scans as read, then form rows (fresh from the download)."""
         from rc import forms
         out = rv.load_records(self.records_path) if self.records_path.exists() else []
+        digests, _ = self.file_check()
+        out = [r if r.digest else rv.SheetRecord(**{**r.__dict__, "digest": digests.get(r.file, "")}) for r in out]
         since = self.settings().get("forms_from", "")
         seen = {r.key for r in out}
         for f in (self.folder.form_files() if self.folder.scans.is_dir() else []):
@@ -253,8 +264,15 @@ class Pool(Month):
         return out
 
     def unfiled(self) -> list[rv.SheetRecord]:
-        filed = self.log.state().filed
-        return [r for r in self.all_records() if r.key not in filed]
+        return [r for r in self.all_records() if not self.is_filed(r)]
+
+    def is_filed(self, r: rv.SheetRecord, state=None) -> bool:
+        """Printed already? A form answer is known by its content (rows move when answers are deleted from the
+        sheet); by its row only if it was filed before answers had digests. A scan page is known by file and page."""
+        st = state or self.log.state()
+        if r.is_form and r.digest and r.digest in st.filed_digests:
+            return True
+        return r.key in st.filed and not (r.is_form and r.key in st.filed_digest_of)
 
     def held(self) -> list[rv.SheetRecord]:
         d = self.decisions()
@@ -325,14 +343,91 @@ class Pool(Month):
         full = self.plan()
         rp, back = self.round_plan()
         open_keys = {i.key for i in full.issues}
-        filed = self.log.state().filed
         return {"open": len(open_keys), "waiting": len(back - open_keys),
                 "ready": sum(1 for i in rp.settled if not i.skipped or i.merged),
                 "children": len({rp.resolved.get(i.record.key) or i.student_id or i.record.key
                                  for i in rp.settled if not i.skipped}),
                 "skipped": sum(1 for i in rp.settled if i.skipped and not i.merged),
                 "held": len(self.held()),
-                "printed": sum(1 for r in self.all_records() if r.key in filed)}
+                "printed": sum(1 for r in self.all_records() if self.is_filed(r))}
+
+    # ---- Inbox.txt: what is waiting, for people (the app never reads it)
+    def inbox_text(self) -> str:
+        from rc import extract
+        cp, _ = self.previous()
+        full = self.plan()
+        rp, back = self.round_plan()
+        month, st = self.round_month, self.log.state()
+        n = self.next_round_number(month, st)
+
+        def where(r):
+            return f"{r.file} row {r.page}" if r.is_form else f"{r.file} p. {r.page}"
+
+        def read(r):
+            pages = f"{r.pages:,} pages" if r.pages is not None else "pages unreadable"
+            return f'"{r.name or "(no name)"}" / {r.teacher or "(no teacher)"}, {pages}'
+
+        def who(item):
+            s = full.student(cp, item.student_id) if item.student_id else None
+            if s:
+                return f"{s.name} ({s.teacher or 'no teacher'})"
+            n_ = item.new_student or {}
+            return f"new: {n_.get('name', '')} ({n_.get('teacher') or 'no teacher'})"
+
+        issues: dict = {}
+        for i in full.issues:
+            issues.setdefault(i.key, []).append(i.message.split(": ", 1)[-1])
+        open_items = [i for i in full.settled if i.record.key in issues]
+        ready = [i for i in rp.settled if not i.skipped]
+        merged = [i for i in rp.settled if i.merged]
+        skipped = [i for i in rp.settled if i.skipped and not i.merged]
+        waiting = [i for i in full.settled if i.record.key in back and i.record.key not in issues]
+        held = self.held()
+        raw = self.folder.work / "raw"
+        unread = []
+        for f in self.folder.scan_files():
+            try:
+                import pymupdf
+                with pymupdf.open(f) as doc:
+                    pages = doc.page_count if f.suffix.lower() == ".pdf" else 1
+            except Exception:
+                pages = 1
+            missing = sum(1 for k in range(1, pages + 1) if not extract.raw_path(raw, f.name, k).exists())
+            if missing:
+                unread.append(f"  {f.name}: {missing} of {pages} page(s) not read yet")
+        _, problems = self.file_check()
+        lines = ["Reading Challenge: what is waiting in the inbox",
+                 "(The app writes this list; changing it changes nothing. Files are in the Scans folder.)", "",
+                 f"Next round: {ck.month_label(month)}, round {n}", ""]
+        if problems:
+            lines += ["PROBLEMS (no round can be printed until these are sorted out)"] + [f"  {x}" for x in problems] + [""]
+        sections = [
+            ("NOT READ YET (press Read on the home screen)", unread),
+            ("NEEDS A DECISION", [f"  {where(i.record)}: {read(i.record)}\n      {'; '.join(issues[i.record.key])}"
+                                  for i in open_items]),
+            ("WAITING FOR ANOTHER SHEET OF THE SAME CHILD", [f"  {where(i.record)}: {read(i.record)}" for i in waiting]),
+            ("READY FOR THE NEXT ROUND", [f"  {where(i.record)}: {who(i)}, {i.pages:,} pages" +
+                                          (f" (with {', '.join(where(r) for r in i.sources[1:])})" if len(i.sources) > 1 else "")
+                                          for i in ready] +
+                                         [f"  {where(i.record)}: {i.skipped}" for i in merged]),
+            ("SKIPPED (filed with the next round, not counted)", [f"  {where(i.record)}: {read(i.record)} - {i.skipped}"
+                                                                  for i in skipped]),
+            ("HELD FOR A LATER ROUND", [f"  {where(r)}: {read(r)}" for r in held]),
+        ]
+        for title, rows in sections:
+            if rows:
+                lines += [f"{title} ({len(rows)})"] + rows + [""]
+        if not any(rows for _, rows in sections):
+            lines += ["Nothing is waiting: every sheet has been printed.", ""]
+        lines += ["Printed sheets: each round's folder has its certificates and a summary of the sheets it used."]
+        return "\n".join(lines) + "\n"
+
+    def write_inbox_list(self) -> None:
+        """Rewrite Inbox.txt if what it says has changed (so the sync service isn't kept busy)."""
+        text = self.inbox_text()
+        path = self.folder.inbox_list
+        if not path.exists() or path.read_text(encoding="utf-8") != text:
+            wsp.write_atomic(path, text)
 
     # ---- review (held sheets can be decided too)
     def _known(self) -> set:
@@ -372,14 +467,17 @@ class Pool(Month):
         latest = self.latest_round_month()
         if latest and month < latest:
             raise ck.CheckpointError(f"{ck.month_label(latest)} has already been printed; choose that month or a later one")
+        _, changed = self.file_check()
+        if changed:
+            raise ck.CheckpointError(changed[0])
         p, back = self.round_plan()
         if not any(not i.skipped for i in p.settled):
             raise ck.CheckpointError("nothing is ready to print yet")
         n = self.next_round_number(month)
         out = self.ws.round_folder(month, n)
-        keys = sorted(i.record.key for i in p.settled)
-        text = self._write(p, out, month, who, [i.record for i in p.settled],
-                           f"{ck.month_label(month)}, round {n}", {"round": n, "keys": keys})
+        used = sorted(p.settled, key=lambda i: i.record.key)
+        text = self._write(p, out, month, who, [i.record for i in p.settled], f"{ck.month_label(month)}, round {n}",
+                           {"round": n, "keys": [i.record.key for i in used], "digests": [i.record.digest for i in used]})
         self.save_settings(round_month="")              # the next round starts from the default again
         return text
 
@@ -426,6 +524,56 @@ def reprint_map(state: ev.State, results, month: str, table, exclude: str = "") 
 
 def round_folder_for(ws: wsp.Workspace, e: ev.Event) -> wsp.RoundFolder:
     return ws.round_folder(e.data["month"], e.data.get("round", 1))
+
+
+def to_scans_layout(ws: wsp.Workspace) -> list[str]:
+    """One time, for a folder set up with the first inbox layout (Inbox/scans, Inbox/work, printed scans moved into
+    '<round>/scans'): every file goes to Scans/ for good, the working files to the app's working folder, and each
+    file keeps the fingerprint it was first seen with. Returns what moved."""
+    import json
+    import shutil
+    old = ws.root / "Inbox"
+    if not old.is_dir():
+        return []
+    inbox = ws.inbox()
+    inbox.scans.mkdir(exist_ok=True)
+    inbox.work.mkdir(exist_ok=True)
+    sources = [old / "scans"] + sorted(ws.root.glob("*/* round */scans"))
+    done = []
+    for base in sources:
+        for src in sorted(p for p in base.rglob("*") if p.is_file() and p.name != ".DS_Store") if base.is_dir() else []:
+            dest = inbox.scans / src.relative_to(base)
+            if dest.exists():
+                if wsp.file_sha256(dest) != wsp.file_sha256(src):
+                    raise ck.CheckpointError(f"{dest.name} exists twice with different contents ({src}); sort it out first")
+                src.unlink()
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), dest)
+            done.append(f"{src.relative_to(ws.root)} -> {dest.relative_to(ws.root)}")
+    work = old / "work"
+    known = {}
+    for name in ("files.json", "printed.json"):
+        f = work / name
+        if f.exists():
+            for k, v in json.loads(f.read_text(encoding="utf-8")).items():
+                known.setdefault(k, {"sha256": v["sha256"]} if name == "printed.json" else v)
+            f.unlink()
+    if work.is_dir():
+        for src in sorted(work.iterdir()):
+            if src.name != ".DS_Store":
+                shutil.move(str(src), inbox.work / src.name)
+    if known:                                         # first-seen fingerprints; size and time are re-read
+        wsp.write_atomic(inbox.work / "files.json", json.dumps(known, indent=1, sort_keys=True))
+    for d in [*ws.root.glob("*/* round */scans"), old]:      # now-empty folders go
+        for sub in sorted((y for y in d.rglob("*") if y.is_dir()), key=lambda y: -len(y.parts)) + [d]:
+            for junk in sub.glob(".DS_Store"):
+                junk.unlink()
+            try:
+                sub.rmdir()
+            except OSError:
+                pass
+    return done
 
 
 def move_to_inbox(ws: wsp.Workspace, who: str) -> list[str]:
@@ -608,7 +756,7 @@ def month_events(p: rv.Plan, before: ck.Checkpoint, with_new: ck.Checkpoint, res
     out.append(ev.Event(finish.kind, finish.data, who, "", (), finish.time, "", finish.id, batch))
     mk = lambda kind, data, src, reason="": out.append(ev.Event(kind, data, who, reason, tuple(src),
                                                                 tick(), "", batch=batch))
-    src_of = lambda rec: ev.sheet_source(rec.file, rec.page, rec.submitted)
+    src_of = lambda rec: ev.sheet_source(rec.file, rec.page, rec.submitted, rec.digest)
     added = set()
     for item in p.settled:
         rec = item.record

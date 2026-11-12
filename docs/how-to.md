@@ -5,7 +5,9 @@ this Mac: nothing goes on the internet except the scanned pages, which are sent 
 
 ## How it works
 
-Every sheet goes into the **Inbox** and waits there until it's printed. When you're ready to hand things out,
+Every scan, photo and form download goes into the **Scans** folder and stays there for good. The app keeps track
+of which sheets are still waiting (the **Inbox**) and writes the list to **Inbox.txt** in the data folder, so you can
+see it without the app. Every sheet waits until it's printed. When you're ready to hand things out,
 **print a round**: the certificates and class lists for every sheet that's settled, for the month you pick
 (last month, unless you change it). Anything still being sorted out just waits for the next round, and new sheets
 can be added at any time, so a late sheet is never a problem: it goes in the next round.
@@ -21,11 +23,16 @@ October becomes "October 2026 · round 1" and nothing else changes.)
    loses pencil).
 2. **Open Reading Challenge** (in Applications, or the Dock).
 3. **Inbox → Add scans, photos or form CSV…** and choose:
-   - the scanned PDF (give each scan its own name, e.g. "Sheets November 2026.pdf");
+   - the scanned PDF (the app puts the date in front of its name, e.g. "2026-11-12 Sheets.pdf", so names never
+     repeat; you can also drop files straight into the Scans folder with Finder);
    - any sheets that came by email (photos are fine, including iPhone .heic);
    - the Google Form responses: in the response spreadsheet, File → Download → Comma-separated values (.csv).
      Every download has all the answers so far; add the new one with the same name and it replaces the old one.
-     Answers already printed aren't used again.
+     Answers already printed aren't used again, even if answers were deleted from the sheet and the rows moved.
+   - Adding the same file twice is refused, even under a different name (and if it's dropped into Scans twice, the
+     home screen says so). If a scan in the Scans folder is swapped for a different file with the same name, the
+     home screen says so too, and no round can be printed until the original is put back (or the new one is added
+     under its own name). Don't move or rename files in Scans: the history points at them.
 4. **Read them** reads the new pages with Claude (about 3½ cents a page; a stack of ~50 sheets takes a couple of
    minutes). If it stops (Wi-Fi dropped), press it again: pages already read are kept.
 5. **1 · Decide → Review sheets:** one row per sheet. Rows marked **needs a look** have a suggestion filled in,
@@ -108,7 +115,7 @@ total written in the monthly box).
 
 ## Old scans
 
-Scans and photos stay in the inbox (printed ones too, so a child's page can still show their sheet). Totals,
+Scans and photos stay in the Scans folder (so a child's page can always show their sheet). Totals,
 history and certificates always stay.
 
 ## When it's closed

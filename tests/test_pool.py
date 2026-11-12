@@ -180,3 +180,73 @@ def test_accepting_a_repeat_reprints_the_certificate_with_the_whole_month(data):
     runner.reprint(p, st.rounds[-1].batch)
     doc = pymupdf.open(wsp.Workspace(data).round_folder("2026-10", 2).certificates)
     assert "reprint, 430 pp" in doc[0].get_text()
+
+
+def test_form_answers_are_known_by_content_when_rows_move(data, tmp_path, monkeypatch):
+    """Answers printed before rounds recorded fingerprints (the October move) keep counting as printed when a new
+    download shifts the rows, and a new answer that lands on a printed row number is not mistaken for it."""
+    import io
+    from rc import app as app_mod
+    monkeypatch.setenv("READING_CHALLENGE_SETTINGS", str(tmp_path / "settings.json"))
+    monkeypatch.setenv("READING_CHALLENGE_WHO", "Jamie")
+    head = "Timestamp,Student Name,Grade and Teacher,Month,Pages\n"
+    ada = "11/2/2026 9:00:00,Ada Example,2nd- Lopez,October,30\n"
+    io_li = "11/3/2026 9:00:00,Io Li,2nd- Park,October,50\n"
+    sam = "11/12/2026 9:00:00,Sam Sample,2nd- Park,November,5\n"
+    m = runner.Month(wsp.Workspace(data), "2026-10")
+    m.log = ev.EventLog(data, "mac")
+    m.folder.create()
+    (m.folder.scans / "Responses.csv").write_text(head + ada + io_li, encoding="utf-8")
+    m.finish(who="Jamie")                             # the old way: filed by row only
+    runner.move_to_inbox(wsp.Workspace(data), "Jamie")
+    home = app_mod.Home(data)
+    new = (head + io_li + sam).encode()               # Ada's answer deleted from the sheet; Sam's added
+    home.add_scan("inbox", "Responses.csv", io.BytesIO(new), len(new))
+    p = runner.Pool(wsp.Workspace(data))
+    assert [(r.key, r.name) for r in p.unfiled()] == [("Responses.csv#3", "Sam Sample")]
+    st = p.log.state()
+    assert st.filed_digest_of["Responses.csv#2"] == forms.row_digest(ada.strip().split(","))   # old row 2
+
+
+def test_rounds_record_each_sheets_fingerprint(data):
+    p = pool(data)
+    (p.folder.scans / "a.jpg").write_bytes(b"not really a picture")
+    rv.save_records([rec("a.jpg", 1, "Ada Example", "Lopez", 30)], p.records_path)
+    sha = wsp.file_sha256(p.folder.scans / "a.jpg")
+    p.finish(who="Jamie")
+    st = p.log.state()
+    assert st.rounds[-1].data["digests"] == [sha]
+    pages = next(e for e in st.events if e.kind == "pages_recorded" and e.batch == st.rounds[-1].batch)
+    assert pages.sources == ({"photo": "a.jpg", "sha256": sha},)
+
+
+def test_scans_never_move_and_duplicates_are_flagged(data):
+    p = pool(data)
+    assert p.folder.scans == data / "Scans"
+    (p.folder.scans / "a.jpg").write_bytes(b"same bytes")
+    rv.save_records([rec("a.jpg", 1, "Ada Example", "Lopez", 30)], p.records_path)
+    p.finish(who="Jamie")
+    assert (p.folder.scans / "a.jpg").exists() and p.records() == []          # printed, still in Scans
+    (p.folder.scans / "a copy.jpg").write_bytes(b"same bytes")                  # dropped in again with Finder
+    _, problems = p.file_check()
+    assert problems == ["a copy.jpg and a.jpg are the same file; move one of them out of the Scans folder "
+                        "(its sheets would count twice)"]
+    with pytest.raises(ck.CheckpointError, match="same file"):
+        p.finish(who="Jamie")
+
+
+def test_inbox_txt_says_what_is_waiting(data):
+    p = pool(data, [rec("a.pdf", 1, "Ada Example", "Lopez", 30), rec("a.pdf", 2, "Quentin Quimby", "", 40),
+                    rec("a.pdf", 3, "Io Li", "Park", 150)])
+    p.set_decision("a.pdf#3", {"hold": True})
+    p.write_inbox_list()
+    text = (data / "Inbox.txt").read_text(encoding="utf-8")
+    assert "Next round: October 2026, round 1" in text
+    assert "NEEDS A DECISION (1)" in text and '"Quentin Quimby" / (no teacher), 40 pages' in text
+    assert "READY FOR THE NEXT ROUND (1)\n  a.pdf p. 1: Ada Example (Lopez), 30 pages" in text
+    assert "HELD FOR A LATER ROUND (1)" in text
+    p.set_decision("a.pdf#2", {"skip": "blank"})
+    p.finish(who="Jamie")
+    p.write_inbox_list()
+    text = (data / "Inbox.txt").read_text(encoding="utf-8")
+    assert "NEEDS A DECISION" not in text and "READY" not in text and "HELD FOR A LATER ROUND (1)" in text

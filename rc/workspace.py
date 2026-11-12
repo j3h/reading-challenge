@@ -6,7 +6,9 @@ Jamie can see it:
 With an event log (the usual case now) sheets are not filed by month until they are printed:
 
     <data folder>/
-      Inbox/scans, Inbox/work         every sheet waiting (or already printed: kept for its scan image)
+      Scans/                          every scan, photo and form download, as it arrived; never moved
+      Inbox.txt                       what is still waiting, written by the app for people
+      App working files (do not edit)/  readings, decisions, file fingerprints
       2026-27/2026-10 round 1/        what one round printed: certificates.pdf, summary.txt, checkpoint.xlsx
       2026-27/2026-10 round 2/        a later round for the same month (late sheets)
 
@@ -110,20 +112,38 @@ class MonthFolder:
         The original moves to scans/originals/. Returns the new file names."""
         return convert_photos(self.scans)
 
+    def registry(self) -> "FileRegistry":
+        return FileRegistry(self.scans, self.work)
 
-INBOX = "Inbox"
+
+SCANS = "Scans"
+WORK = "App working files (do not edit)"
+INBOX_LIST = "Inbox.txt"
 
 
 @dataclass(frozen=True)
 class Inbox(MonthFolder):
-    """Where every sheet waits until a round prints it: scans, photos and form downloads (scans/), what was read
-    and decided (work/). One for the whole data folder; a sheet's month is chosen when a round prints it."""
+    """Every scan, photo and form download, kept where it arrived for good (Scans/), and what was read from them
+    and decided about them (the app's working folder). Which sheets are still waiting is worked out from the event
+    log and written to Inbox.txt for people; nothing ever moves. A sheet's month is chosen when a round prints it."""
     month: str = "inbox"
     season: str = ""
 
     @property
     def path(self) -> Path:
-        return self.root / INBOX
+        return self.root
+
+    @property
+    def scans(self) -> Path:
+        return self.root / SCANS
+
+    @property
+    def work(self) -> Path:
+        return self.root / WORK
+
+    @property
+    def inbox_list(self) -> Path:
+        return self.root / INBOX_LIST
 
     def is_finished(self) -> bool:
         return False
@@ -212,6 +232,80 @@ class Workspace:
             return self.start_checkpoint(starts[-1]), f"starting checkpoint in {starts[-1]}/start"
         return None, "no earlier checkpoint: this is the first month"
 
+
+def file_sha256(path) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+class FileRegistry:
+    """The SHA-256 of every file in a scans folder (originals/ included), as first seen: work/files.json.
+
+    It is the fingerprint events point at, so a file can be checked later against what was read; it also catches the
+    same file added twice under another name, and a file swapped for a different one under the same name. Hashing is
+    skipped while a file's size and modified time are unchanged."""
+
+    def __init__(self, scans, work):
+        self.scans, self.path = Path(scans), Path(work) / "files.json"
+
+    def load(self) -> dict:
+        import json
+        try:
+            return json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else {}
+        except ValueError:
+            return {}
+
+    def _save(self, data: dict) -> None:
+        import json
+        write_atomic(self.path, json.dumps(data, indent=1, sort_keys=True))
+
+    def files(self) -> list[Path]:
+        if not self.scans.is_dir():
+            return []
+        return sorted(p for p in self.scans.rglob("*") if p.is_file() and not p.name.startswith(".")
+                      and (p.suffix.lower() in SCAN_EXTS | PHOTO_EXTS | FORM_EXTS))
+
+    def name(self, path: Path) -> str:
+        return path.relative_to(self.scans).as_posix()
+
+    def check(self) -> tuple[dict, list[str]]:
+        """({name: sha256} for every file now, [problems]). New files are registered. A scan or photo whose content
+        changed since it was registered is a problem (a form download is expected to change: it is re-registered)."""
+        data, changed, problems, now = self.load(), False, [], {}
+        for p in self.files():
+            name, st = self.name(p), p.stat()
+            old = data.get(name)
+            if old and old.get("size") == st.st_size and old.get("mtime") == st.st_mtime:
+                now[name] = old["sha256"]
+                continue
+            digest = file_sha256(p)
+            now[name] = digest
+            if old and old["sha256"] != digest and p.suffix.lower() not in FORM_EXTS:
+                problems.append(f"{name} is not the same file it was when it was added (its contents changed); put the "
+                                f"original back, or add the new one under another name")
+                continue                        # keep the original fingerprint until someone sorts it out
+            data[name] = {"sha256": digest, "size": st.st_size, "mtime": st.st_mtime,
+                          **({"first": old.get("first")} if old and old.get("first") else {})}
+            changed = True
+        if changed:
+            self._save(data)
+        groups: dict = {}
+        for name, digest in now.items():                 # e.g. the same scan dropped in twice under two names
+            groups.setdefault(digest, []).append(name)
+        for names in groups.values():
+            if len(names) > 1:
+                problems.append(f"{' and '.join(sorted(names))} are the same file; move one of them out of the "
+                                f"Scans folder (its sheets would count twice)")
+        return now, problems
+
+    def find(self, digest: str, exclude: str = "") -> str:
+        """The name of a file already here with this SHA-256, or ''."""
+        now, _ = self.check()
+        return next((n for n, d in now.items() if d == digest and n != exclude), "")
 
 def convert_photos(folder) -> list[str]:
     import shutil

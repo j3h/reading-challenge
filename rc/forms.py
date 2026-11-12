@@ -44,6 +44,14 @@ def _pages(text: str) -> int | None:
     return int(float(s)) if re.fullmatch(r"\d+(\.\d+)?", s) else None
 
 
+def row_digest(cells) -> str:
+    """SHA-256 of one response's answers (timestamp, name, class, month, pages), whitespace-normalised: the same
+    answer has the same digest in every download, wherever its row ends up."""
+    import hashlib
+    text = "\x1f".join(" ".join(str(c or "").split()) for c in cells)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def _submitted_date(text: str):
     """'11/3/2026 18:37:20' (Google's US format) or ISO -> date, else None."""
     import datetime as dt
@@ -112,7 +120,8 @@ def pool_records(path, since: str = "") -> tuple[list[rv.SheetRecord], list[str]
             confidence=rv.HIGH, pages_confidence=rv.HIGH if pages is not None else rv.UNREADABLE,
             note=f"Google Form, submitted {submitted}" + ("" if month else "; no month given") +
                  ("" if pages is not None else f"; pages answer was {get(r, 'pages')!r}"),
-            grade=grade, submitted=submitted))
+            grade=grade, submitted=submitted,
+            digest=row_digest([get(r, k) for k in ("time", "name", "teacher", "month", "pages")])))
     return out, left_out
 
 
@@ -150,5 +159,6 @@ def records(path, batch_month: str) -> tuple[list[rv.SheetRecord], list[str]]:
             confidence=rv.HIGH, pages_confidence=rv.HIGH if pages is not None else rv.UNREADABLE,
             note=f"Google Form, submitted {submitted}" + ("" if pages is not None else
                                                            f"; pages answer was {get(r, 'pages')!r}"),
-            grade=grade, submitted=submitted))
+            grade=grade, submitted=submitted,
+            digest=row_digest([get(r, k) for k in ("time", "name", "teacher", "month", "pages")])))
     return out, skipped

@@ -87,7 +87,10 @@ def test_form_rows_join_the_months_review_and_are_recorded_with_their_row(data):
     st = m.log.state()
     zed = next(s for s in st.students.values() if s.name == "Zed Newcomer")
     rec = next(e for e in st.by_student[zed.id] if e.kind == "pages_recorded")
-    assert rec.sources == ({"form": "responses.csv", "row": 4, "submitted": "11/3/2026 18:37:20"},)
+    src, = rec.sources                       # the row, and a fingerprint of its answers
+    assert {k: v for k, v in src.items() if k != "row_sha256"} == {"form": "responses.csv", "row": 4,
+                                                                    "submitted": "11/3/2026 18:37:20"}
+    assert len(src["row_sha256"]) == 64
     assert st.students[zed.id].grade == "1" and st.students["S0002"].total == 210
 
 

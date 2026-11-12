@@ -184,6 +184,7 @@ class Home:
                if self.job else None, "mac": sys.platform == "darwin"}
         out["keep_raw_months"] = settings.keep_raw_months()
         if out["folder_ok"]:
+            runner.to_scans_layout(self.ws)            # a folder from the first inbox layout: once, then never again
             out["pool"] = self.uses_pool()
             if out["pool"]:
                 out["inbox"] = self.inbox_status()
@@ -205,17 +206,25 @@ class Home:
         f = p.folder
         if f.scans.is_dir():
             f.convert_photos()                      # photos dropped in with Finder
-        scans = [{"name": x.name, "pages": self._page_count(x), "mb": round(x.stat().st_size / 1e6, 1)}
-                 for x in f.scan_files()]
-        pages = sum(x["pages"] for x in scans)
         raw = f.work / "raw"
-        read = sum(1 for x in raw.glob("*.json")) if raw.is_dir() else 0
+        waiting = {r.file for r in p.unfiled()}            # Scans keeps everything: show only files still in play
+        scans = []
+        for x in f.scan_files():
+            n_pages = self._page_count(x)
+            unread = sum(1 for n in range(1, n_pages + 1) if not extract.raw_path(raw, x.name, n).exists())
+            if unread or x.name in waiting:
+                scans.append({"name": x.name, "pages": n_pages, "unread": unread,
+                              "mb": round(x.stat().st_size / 1e6, 1)})
+        pages = sum(x["pages"] for x in scans)
+        read = pages - sum(x["unread"] for x in scans)
         from rc import forms as forms_mod
         since = p.settings().get("forms_from", "")
         forms = []
+        st_now = p.log.state()
         for x in (f.form_files() if f.scans.is_dir() else []):
-            try:
-                forms.append({"name": x.name, "rows": len(forms_mod.pool_records(x, since)[0])})
+            try:                                   # only answers not printed yet
+                forms.append({"name": x.name, "rows": sum(1 for r in forms_mod.pool_records(x, since)[0]
+                                                          if not p.is_filed(r, st_now))})
             except ck.CheckpointError as e:
                 forms.append({"name": x.name, "rows": 0, "problem": str(e)})
         state = p.log.state()
@@ -232,6 +241,13 @@ class Home:
                 out["counts"] = p.counts()
             except ck.CheckpointError as e:
                 out["problem"] = str(e)
+        _, changed = p.file_check()                    # a scan swapped under the same name: rounds wait until sorted
+        if changed:
+            out["problem"] = "; ".join(filter(None, [out["problem"]] + changed))
+        try:
+            p.write_inbox_list()
+        except (ck.CheckpointError, OSError):
+            pass                                       # the list is a convenience; never stop the home screen for it
         return out
 
     def rounds(self) -> list[dict]:
@@ -308,6 +324,8 @@ class Home:
         f = self.month(month).folder.create()
         if f.is_finished():
             raise ck.CheckpointError(f"{ck.month_label(f.month)} is finished; reopen it to add scans")
+        if month == INBOX and Path(name).suffix.lower() not in wsp.FORM_EXTS and not re.match(r"\d{4}-\d{2}-\d{2} ", name):
+            name = f"{dt.date.today().isoformat()} {name}"     # names stay unique over the years; files never move
         target = f.scans / name
         replacing = target.exists() and target.suffix.lower() in wsp.FORM_EXTS and month == INBOX
         if target.exists() and not replacing:      # a form download holds every answer so far: the new one replaces it
@@ -322,18 +340,18 @@ class Home:
                         raise ck.CheckpointError("the upload was cut short; try again")
                     out.write(chunk)
                     left -= len(chunk)
+            digest = wsp.file_sha256(tmp)
+            same = f.registry().find(digest, exclude=name)
+            if same:                                       # the same bytes under another name: counted twice otherwise
+                raise ck.CheckpointError(f"{name} is the same file as {same}, which is already here")
+            if replacing and wsp.file_sha256(target) == digest:
+                return self.state()                        # the same download again: nothing new
             if target.suffix.lower() in wsp.FORM_EXTS:
                 from rc import forms as forms_mod
                 if month == INBOX:                         # refuses a CSV without name and pages columns
-                    new_rows = forms_mod.pool_records(tmp, "")[0]
-                    if replacing:                          # a download is cumulative: it must still hold the old rows
-                        old = {r.page: r.submitted for r in forms_mod.pool_records(target, "")[0]}
-                        new = {r.page: r.submitted for r in new_rows}
-                        moved = [row for row, t in old.items() if t and new.get(row) != t]
-                        if moved:
-                            raise ck.CheckpointError(f"{name}: the new download does not have the same answers in the "
-                                                     f"same rows as the old one (first: row {moved[0]}); were answers "
-                                                     f"deleted from the sheet?")
+                    forms_mod.pool_records(tmp, "")
+                    if replacing:                          # answers keep their decisions, and their identity, by content
+                        self._follow_answers(target, tmp)
                 else:
                     forms_mod.records(tmp, f.month)
             if target.suffix.lower() == ".pdf":
@@ -350,6 +368,43 @@ class Home:
         self._reviews.pop(INBOX if month == INBOX else f.month, None)
         return self.state()
 
+    def _follow_answers(self, old_file: Path, new_file: Path) -> None:
+        """A new download of the form responses is about to replace the old one. Rows can move (an answer deleted from
+        the sheet shifts the rest up), so answers are matched by the SHA-256 of their content: review decisions move
+        with them, and answers printed before rounds recorded that fingerprint get it recorded now (in the same round's
+        batch, so undoing that round still frees them). An answer that was edited is a new answer."""
+        from rc import events as ev
+        from rc import forms as forms_mod
+        pool = self.pool()
+        old = forms_mod.pool_records(old_file, "")[0]
+        new = forms_mod.pool_records(new_file, "")[0]
+        st = pool.log.state()
+        backfill: dict = {}
+        for r in old:
+            if r.key in st.filed and r.key not in st.filed_digest_of and r.digest:
+                backfill.setdefault(st.filed_batch.get(r.key, ""), []).append(r)
+        events = []
+        for batch, rows in backfill.items():
+            round_event = next((e for e in st.rounds if e.batch == batch), None)
+            if round_event is None:
+                continue
+            events.append(ev.Event("sheets_filed", {"month": round_event.data["month"], "keys": [r.key for r in rows],
+                                                    "digests": [r.digest for r in rows]},
+                                   settings.who() or "Reading Challenge app",
+                                   "fingerprints of form answers already printed, recorded before a new download",
+                                   ({"manual": True},), batch=batch))
+        if events:
+            pool.log.append(events)
+        decisions = pool.decisions()
+        prefix = old_file.name + "#"
+        by_digest = {r.digest: decisions[r.key] for r in old if r.key in decisions and r.digest}
+        updated = {k: v for k, v in decisions.items() if not k.startswith(prefix)}
+        for r in new:                                     # (the new file still has its upload name: use the real one)
+            if r.digest in by_digest:
+                updated[f"{prefix}{r.page}"] = by_digest[r.digest]
+        if updated != decisions:
+            rv.save_decisions(updated, pool.decisions_path, "new form download (answers matched by content)")
+
     def start_reading(self, month: str, client=None) -> dict:
         """Read the month's scans with Claude in the background; the page polls `state()["job"]`."""
         with self._lock:
@@ -365,10 +420,13 @@ class Home:
                 raise ck.CheckpointError("some files are still downloading from iCloud; open the month's folder in "
                                          "Finder, wait for them, then try again")
             client = client or extract.make_client()
-            job = self.job = ReadJob(INBOX if month == INBOX else m.folder.month, total=status["pages"])
+            # pages already read come back from the saved readings at no cost: count only the new ones
+            job = self.job = ReadJob(INBOX if month == INBOX else m.folder.month,
+                                     total=max(status["pages"] - status["read"], 0))
 
         def page_done(ok, sent):
-            job.done += 1
+            if sent or not ok:
+                job.done += 1
             job.sent += bool(sent and ok)
             job.failed += not ok
 
@@ -612,7 +670,7 @@ class Home:
         if "scan" in src or "photo" in src:
             file = src.get("scan") or src.get("photo")
             try:
-                if (self.ws.inbox().scans / file).exists():
+                if self.uses_pool() and (self.ws.inbox().scans / file).exists():
                     month, key = INBOX, f"{file}#{src.get('page', 1)}"
                 elif (self.month(month).folder.scans / file).exists():
                     key = f"{file}#{src.get('page', 1)}"

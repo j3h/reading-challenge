@@ -55,6 +55,7 @@ class SheetRecord:
     boxes: dict = field(default_factory=dict)   # where each value was read: {"name": [x0, y0, x1, y1]} on 0-1000
     grade: str = ""            # when the source says (a form's "Grade and Teacher")
     submitted: str = ""        # a form row's timestamp
+    digest: str = ""           # SHA-256 of the scan/photo file as stored, or of a form row's answers
 
     @property
     def is_form(self) -> bool:

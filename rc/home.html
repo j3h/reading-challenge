@@ -228,9 +228,12 @@ function inboxCard(ib) {
   return el("div", { class: "card" },
     el("div", { class: "row" }, el("h2", { style: "flex:1;margin:0" }, "Inbox"),
       fileInput, el("button", { class: !ib.scans.length && !ib.forms.length ? "primary" : "", onclick: () => fileInput.click() }, uploading === "inbox" ? "Adding…" : "Add scans, photos or form CSV…"),
-      el("button", { onclick: () => act("/api/home/finder", { month: "inbox", what: "scans" }) }, "Show in Finder")),
-    el("p", { class: "muted" }, "Every sheet waits here until a round prints it. Add new scans or a fresh download of the form responses at any time.",
-      " ", `${ib.scans.length} scan file${ib.scans.length === 1 ? "" : "s"} (${fmt(ib.pages)} pages)` + (ib.forms.length ? ` · ${formRows} form answer${formRows === 1 ? "" : "s"}` : "")),
+      el("button", { onclick: () => act("/api/home/finder", { month: "inbox", what: "scans" }) }, "Scans folder")),
+    el("p", { class: "muted" }, "Sheets wait here until a round prints them. Every file stays in the Scans folder for good; Inbox.txt in the data folder lists what's waiting. Add new scans or a fresh download of the form responses at any time."),
+    el("p", {}, ib.scans.length || formRows
+      ? "Waiting: " + [ib.scans.length ? `${ib.scans.length} scan file${ib.scans.length === 1 ? "" : "s"} (${fmt(ib.pages)} page${ib.pages === 1 ? "" : "s"}${ib.read === ib.pages ? "" : `, ${fmt(ib.pages - ib.read)} not read yet`})` : "",
+                       formRows ? `${formRows} form answer${formRows === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ")
+      : "Nothing waiting."),
     ib.problem ? el("p", { class: "bad" }, ib.problem) : null,
     ib.still_in_icloud ? el("p", { class: "bad" }, `${ib.still_in_icloud} file(s) are still downloading from iCloud. Open the inbox in Finder and wait for them.`) : null,
     job && !job.running && job.error ? el("p", { class: "bad" }, "Reading stopped: " + job.error) : null,
@@ -254,7 +257,7 @@ function inboxCard(ib) {
             (c.open || c.waiting || c.held ? `\n\n${c.open + c.waiting + c.held} sheet(s) still open, waiting or held stay in the inbox for a later round.` : "") +
             "\n\nThe prizes on its class lists count as handed out.") && act("/api/home/round", {}) },
           `Print round →`))) : el("p", { class: "muted" }, "Nothing to review yet."),
-    c && c.printed ? el("p", { class: "muted" }, `${c.printed} sheet(s) in the inbox were printed in earlier rounds (kept for their scans).`) : null);
+    null);
 }
 
 function roundsCard(rounds) {

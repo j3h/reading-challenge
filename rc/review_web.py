@@ -101,6 +101,10 @@ class ReviewApp:
                   for k in (STATUS_OPEN, STATUS_AUTO, STATUS_DECIDED, STATUS_SKIPPED) + ((STATUS_HELD,) if pool else ())}
         extra = {}
         if pool:
+            try:
+                m.write_inbox_list()                  # Inbox.txt follows every decision
+            except (ck.CheckpointError, OSError):
+                pass
             month = m.round_month
             extra = {"pool": True, "round_month": month, "round_label": ck.month_label(month),
                      "next_round": m.next_round_number(month), "round": m.counts()}
@@ -229,7 +233,7 @@ class ReviewApp:
                 raise KeyError(cache)
             x0, y0, x1, y1 = rec.boxes[field]
             padx, pady = max(25, (x1 - x0) * 0.3), max(15, (y1 - y0) * 0.6)   # the model's boxes are approximate
-            page = pymupdf.open(self.month.folder.scans / rec.file)[rec.page - 1]   # PDFs and pictures alike
+            page = pymupdf.open(self.month.scan_path(rec.file))[rec.page - 1]   # PDFs and pictures alike
             w, h = page.rect.width, page.rect.height
             clip = pymupdf.Rect(max(0, x0 - padx) * w / 1000, max(0, y0 - pady) * h / 1000,
                                 min(1000, x1 + padx) * w / 1000, min(1000, y1 + pady) * h / 1000)
@@ -242,15 +246,14 @@ class ReviewApp:
             if key in self._images:
                 return self._images[key]
             rec = next((r for r in self._all_records() if r.key == key), None)
-            if rec is None or rec.is_form or not (self.month.folder.scans / rec.file).exists():
+            if rec is None or rec.is_form or not self.month.scan_path(rec.file).exists():
                 raise KeyError(key)                   # unknown, typed in a form, or the scan was let go
-            path = self.month.folder.scans / rec.file
+            from rc import extract
+            path = self.month.scan_path(rec.file)
             if path.suffix.lower() == ".pdf":
-                pix = pymupdf.open(path)[rec.page - 1].get_pixmap(dpi=IMAGE_DPI, colorspace=pymupdf.csRGB)
+                pix = extract.page_pixmap(pymupdf.open(path)[rec.page - 1], IMAGE_DPI, 1600)
             else:
-                pix = pymupdf.Pixmap(str(path))
-                if pix.colorspace is None or pix.n - pix.alpha != 3:
-                    pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
+                pix = extract.image_pixmap(path, 2400)
             self._images[key] = pix.tobytes("jpeg", jpg_quality=82)
             return self._images[key]
 

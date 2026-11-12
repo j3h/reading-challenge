@@ -364,13 +364,31 @@ def test_the_inbox_takes_scans_and_forms_and_prints_rounds(logged, monkeypatch):
     csv2 = csv1 + b"11/9/2026 9:00:00,Ada Example,2nd- Lopez,November,12\n"
     st = home.add_scan("inbox", "Responses.csv", io.BytesIO(csv2), len(csv2))
     assert st["inbox"]["counts"]["printed"] == 1
-    # ... but one that lost or moved answers is refused
+    pool = home.pool()
+    pool.set_decision("Responses.csv#3", {"hold": True})
+    # the printed answer was deleted from the sheet: the November answer moves up a row, and keeps its decision;
+    # the printed one is known by its content, so it is never taken for the new row 2
     csv3 = b"Timestamp,Student Name,Grade and Teacher,Month,Pages\n11/9/2026 9:00:00,Ada Example,2nd- Lopez,November,12\n"
-    with pytest.raises(ck.CheckpointError, match="same rows"):
-        home.add_scan("inbox", "Responses.csv", io.BytesIO(csv3), len(csv3))
-    # scans with the same name as one already there are refused
-    home.add_scan("inbox", "a.pdf", io.BytesIO(pdf_bytes(1)), len(pdf_bytes(1)))
+    st = home.add_scan("inbox", "Responses.csv", io.BytesIO(csv3), len(csv3))
+    assert pool.decisions() == {"Responses.csv#2": {"hold": True}}
+    assert [r.key for r in pool.held()] == ["Responses.csv#2"] and st["inbox"]["counts"]["printed"] == 0
+    # the same download again changes nothing; the same file under another name is refused
+    home.add_scan("inbox", "Responses.csv", io.BytesIO(csv3), len(csv3))
+    with pytest.raises(ck.CheckpointError, match="same file as Responses.csv"):
+        home.add_scan("inbox", "Responses (1).csv", io.BytesIO(csv3), len(csv3))
+    # scans: a name already there, or the same bytes under a new name, are refused
+    one = pdf_bytes(1)
+    import datetime as dt
+    named = f"{dt.date.today().isoformat()} a.pdf"                  # new scans get the day they arrived in front
+    home.add_scan("inbox", "a.pdf", io.BytesIO(one), len(one))
+    assert (pool.folder.scans / named).exists()
     with pytest.raises(ck.CheckpointError, match="already a scan"):
-        home.add_scan("inbox", "a.pdf", io.BytesIO(pdf_bytes(1)), len(pdf_bytes(1)))
+        home.add_scan("inbox", named, io.BytesIO(one), len(one))
+    with pytest.raises(ck.CheckpointError, match=f"same file as {named}"):
+        home.add_scan("inbox", "a copy.pdf", io.BytesIO(one), len(one))
+    # a scan swapped for different contents under the same name stops the next round
+    (pool.folder.scans / named).write_bytes(pdf_bytes(2))
+    assert "not the same file" in home.state()["inbox"]["problem"]
+    (pool.folder.scans / named).unlink()
     st = home.undo_round(st["rounds"][0]["batch"], "testing")
     assert st["rounds"] == []

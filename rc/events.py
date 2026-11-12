@@ -32,7 +32,7 @@ Event kinds (data fields):
     event_voided       event                         cancels another event; needs a reason
     month_finished     month [, round, keys]         a month was finished, or a round printed for it: `round` is its
                                                      number within the month, `keys` the inbox sheets it used up
-    sheets_filed       month, keys                   inbox sheets a month's finish used (written when a month folder
+    sheets_filed       month, keys [, digests]       inbox sheets a month's finish used (written when a month folder
                                                      moved into the inbox; same batch as that finish)
     teacher_grade_set  teacher, grade                the grade a teacher's class is (new students and class changes
                                                      take it; changeable, e.g. a teacher moving grades next year)
@@ -178,6 +178,9 @@ class State:
     finished: dict = field(default_factory=dict)              # month -> its first month_finished event
     rounds: list = field(default_factory=list)                # every live month_finished event (rounds), time order
     filed: set = field(default_factory=set)                   # inbox sheet keys a live round has used
+    filed_digest_of: dict = field(default_factory=dict)       # filed key -> the sheet's SHA-256 (when recorded)
+    filed_digests: set = field(default_factory=set)           # every SHA-256 a live round has used
+    filed_batch: dict = field(default_factory=dict)           # filed key -> batch of the round that used it
     teacher_grades: dict = field(default_factory=dict)        # teacher -> grade (latest teacher_grade_set)
     voided: set = field(default_factory=set)
     by_student: dict = field(default_factory=dict)            # id -> [Event] (live and voided, time order)
@@ -243,10 +246,10 @@ def _apply(st: State, e: Event, last_set: dict) -> None:
                                f"({first.device}, {e.device}): check for double counting")
         st.finished.setdefault(d["month"], e)
         st.rounds.append(e)
-        st.filed.update(d.get("keys") or ())
+        _file(st, e)
         return
     if e.kind == "sheets_filed":
-        st.filed.update(d["keys"])
+        _file(st, e)
         return
     if e.kind == "teacher_grade_set":
         if d["grade"].strip():
@@ -292,15 +295,28 @@ def _apply(st: State, e: Event, last_set: dict) -> None:
         st.prizes_given.setdefault(sid, set()).update(int(t) for t in d["levels"])
 
 
+def _file(st: State, e: Event) -> None:
+    """Record the sheets a round used: `keys`, with `digests` (same order, '' where unknown) when recorded."""
+    keys, digests = e.data.get("keys") or [], e.data.get("digests") or []
+    for i, k in enumerate(keys):
+        st.filed.add(k)
+        st.filed_batch.setdefault(k, e.batch)
+        if i < len(digests) and digests[i]:
+            st.filed_digest_of[k] = digests[i]
+            st.filed_digests.add(digests[i])
+
+
 def _time(e: Event) -> dt.datetime:
     return dt.datetime.fromisoformat(e.time)
 
 
-def sheet_source(file: str, page: int, submitted: str = "") -> dict:
-    """Where a reviewed sheet came from: a page of a scanned PDF, a photo, or a row of form responses."""
+def sheet_source(file: str, page: int, submitted: str = "", digest: str = "") -> dict:
+    """Where a reviewed sheet came from: a page of a scanned PDF, a photo, or a row of form responses. `digest` is the
+    SHA-256 of the file as stored (scan, photo) or of the row's answers (form): kept as sha256 / row_sha256."""
     if file.lower().endswith(".csv"):
-        return {"form": file, "row": page, "submitted": submitted}
-    return {"scan": file, "page": page} if file.lower().endswith(".pdf") else {"photo": file}
+        return {"form": file, "row": page, "submitted": submitted, **({"row_sha256": digest} if digest else {})}
+    out = {"scan": file, "page": page} if file.lower().endswith(".pdf") else {"photo": file}
+    return {**out, **({"sha256": digest} if digest else {})}
 
 
 def _source_text(e: Event) -> str:
