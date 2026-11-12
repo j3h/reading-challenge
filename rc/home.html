@@ -87,6 +87,7 @@
 <script>
 "use strict";
 const TOKEN = "__TOKEN__";
+let part = null, openMonth = "";
 let state = null, showSettings = false, uploading = "", polling = null, people = null, person = null, filter = "", classes = null;
 const $ = (id) => document.getElementById(id);
 function el(tag, attrs, ...kids) {              // text only: nothing is ever parsed as HTML
@@ -109,7 +110,7 @@ async function api(path, body) {
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
 }
-const act = (path, body) => api(path, body).then((s) => { state = s; render(); }).catch((e) => fail(e.message));
+const act = (path, body) => api(path, body).then((s) => { state = s; part = null; render(); }).catch((e) => fail(e.message));
 const fmt = (n) => Number(n).toLocaleString();
 const money = (n) => "$" + Number(n).toFixed(2);
 
@@ -280,6 +281,28 @@ function roundsCard(rounds) {
     older.length ? el("details", {}, el("summary", {}, `Earlier rounds (${older.length})`), older.map(one)) : null);
 }
 
+// participation: children who read each month (from the history, all rounds of a month together)
+function participationCard() {
+  if (!part) { api("/api/home/participation").then((d) => { part = d; render(); }).catch(() => {}); return null; }
+  if (!part.months.length) return null;
+  const year = part.months[0].year;
+  const table = (rows) => el("table", { class: "list" },
+    el("thead", {}, el("tr", {}, ["Month", "Children", "New", "Pages", "Prizes"].map((h, i) => el("th", { style: i ? "text-align:right" : "" }, h)))),
+    el("tbody", {}, rows.flatMap((m) => {
+      const open = openMonth === m.month;
+      const row = el("tr", { class: "pick", title: "Show by class", onclick: () => { openMonth = open ? "" : m.month; render(); } },
+        el("td", {}, (open ? "▾ " : "▸ ") + m.label), el("td", { class: "num" }, el("b", {}, fmt(m.students))),
+        el("td", { class: "num" }, fmt(m.new)), el("td", { class: "num" }, fmt(m.pages)), el("td", { class: "num", title: m.prizes == null ? "Before the app: the old spreadsheet didn't record which month prizes were given" : "" }, m.prizes == null ? "—" : fmt(m.prizes)));
+      return open ? [row, el("tr", {}, el("td", { colspan: 5, class: "muted" },
+        m.classes.map(([t, n]) => `${t} ${n}`).join(" · ")))] : [row];
+    })));
+  const now = part.months.filter((m) => m.year === year), older = part.months.filter((m) => m.year !== year);
+  return el("div", { class: "card" }, el("h2", {}, "Participation"),
+    el("p", { class: "muted" }, `Children who read each month (every round of a month counted once; "New" is a child's first month ever). Click a month for its classes (as they are now). Records start ${part.first_month ? part.months[part.months.length - 1].label : ""}.`),
+    el("h3", { style: "margin:4px 0" }, `School year ${year}`), table(now),
+    older.length ? el("details", { style: "margin-top:10px" }, el("summary", {}, `Earlier school years (${new Set(older.map((m) => m.year)).size})`), table(older)) : null);
+}
+
 function moveCard() {
   return el("div", { class: "card warn" }, el("h2", {}, "Move the months into the inbox"),
     el("p", {}, `This data folder still keeps sheets month by month (${state.months.map((m) => m.label).join(", ")}). The app now keeps every sheet in one inbox and prints them in rounds. Moving is a one-time step: scans and decisions go into the inbox, and each finished month's files become its "round 1".`),
@@ -425,6 +448,8 @@ function months() {
     out.push(inboxCard(state.inbox));
     const r = roundsCard(state.rounds || []);
     if (r) out.push(r);
+    const pc = participationCard();
+    if (pc) out.push(pc);
     return out;
   }
   const have = new Set(state.months.map((m) => m.key));

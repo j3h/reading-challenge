@@ -536,6 +536,41 @@ class Home:
                             "owed": [f"{p} ({t:,})" for t, _, p in st.owed(mc.load_levels()).get(sid, [])]},
                 "timeline": timeline[::-1], "teachers": sorted({x.teacher for x in st.students.values() if x.teacher})}
 
+    # ------------------------------------------------------------------ participation
+    def participation(self) -> dict:
+        """Per month, newest first: how many children read (pages recorded, after corrections), their pages, how many
+        read for the first time, prizes handed out that month, and the children per class (classes as they are now)."""
+        from collections import Counter
+        st = self._log().state()
+        first: dict = {}
+        months: dict = {}
+        for (sid, month), pages in st.month_pages.items():
+            if pages <= 0:
+                continue
+            first[sid] = min(first.get(sid, month), month)
+            row = months.setdefault(month, {"month": month, "label": ck.month_label(month),
+                                            "year": wsp.season_for(month), "students": 0, "pages": 0, "new": 0,
+                                            "prizes": 0, "classes": Counter()})
+            row["students"] += 1
+            row["pages"] += pages
+            s = st.students.get(sid)
+            row["classes"][(s.teacher if s and s.teacher else "no teacher")] += 1
+        for sid, month in first.items():
+            months[month]["new"] += 1
+        for e in st.events:
+            if e.kind == "prizes_given" and e.id not in st.voided and not e.reason.startswith("assumed handed out") \
+                    and e.data["month"] in months:
+                months[e.data["month"]]["prizes"] += len(e.data["levels"])
+        since = min((e.data["month"] for e in st.rounds), default="")   # prizes are known by month from here on
+        out = []
+        for m in sorted(months, reverse=True):
+            row = months[m]
+            if not since or m < since:
+                row["prizes"] = None          # the old spreadsheet's prizes were imported without the month given
+            row["classes"] = sorted(row["classes"].items(), key=lambda kv: (-kv[1], kv[0].lower()))
+            out.append(row)
+        return {"months": out, "first_month": min(months) if months else ""}
+
     # ------------------------------------------------------------------ teachers and their grades
     def teachers(self) -> dict:
         """Every class: its grade (if set), how many students, and the grades its students have now."""

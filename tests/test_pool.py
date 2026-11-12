@@ -250,3 +250,17 @@ def test_inbox_txt_says_what_is_waiting(data):
     p.write_inbox_list()
     text = (data / "Inbox.txt").read_text(encoding="utf-8")
     assert "NEEDS A DECISION" not in text and "READY" not in text and "HELD FOR A LATER ROUND (1)" in text
+
+
+def test_participation_counts_children_per_month(data, tmp_path, monkeypatch):
+    from rc import app as app_mod
+    monkeypatch.setenv("READING_CHALLENGE_SETTINGS", str(tmp_path / "settings.json"))
+    p = pool(data, [rec("a.pdf", 1, "Ada Example", "Lopez", 30), rec("a.pdf", 2, "Io Li", "Park", 150)])
+    p.finish(who="Jamie")
+    p = pool(data, [rec("b.jpg", 1, "Ada Example", "Lopez", 400)])
+    p.set_decision("b.jpg#1", {"student": "S0001", "pages": 400, "repeat_ok": True})
+    p.finish(who="Jamie")                                 # a second round for October: Ada still counts once
+    oct_ = app_mod.Home(data).participation()["months"][0]
+    assert (oct_["label"], oct_["students"], oct_["pages"]) == ("October 2026", 2, 580)
+    assert oct_["new"] == 2 and oct_["classes"] == [("Lopez", 1), ("Park", 1)]
+    assert oct_["prizes"] == 3                           # Ada 100 and Io 2,500 (round 1), Ada 500 (round 2)

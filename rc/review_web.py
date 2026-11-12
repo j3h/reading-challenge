@@ -331,6 +331,8 @@ def make_server(app: ReviewApp | None = None, port: int = 0, home=None) -> tuple
                     return self._json(200, home.state())
                 if url.path == "/api/home/students" and home is not None:
                     return self._json(200, home.students())
+                if url.path == "/api/home/participation" and home is not None:
+                    return self._json(200, home.participation())
                 if url.path == "/api/home/teachers" and home is not None:
                     return self._json(200, home.teachers())
                 if url.path == "/api/home/student" and home is not None:
